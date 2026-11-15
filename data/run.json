@@ -1,0 +1,21 @@
+{
+  "_help": "Параметры забега. Все диапазоны — [мин, макс] включительно. fields — через сколько полей наступает угроза. need — сколько ресурсов нужно (они тратятся).",
+  "hand_size": [3, 5],
+  "rock_cells": [0, 2],
+  "prebuilt_cells": [0, 2],
+  "prebuilt_pool": ["field", "field", "house", "mill", "wall", "mine", "tower", "market"],
+  "goals": [
+    { "resource": "food",  "target": [4, 9], "reward": { "gold": 5 } },
+    { "resource": "force", "target": [3, 7], "reward": { "gold": 5 } },
+    { "resource": "gold",  "target": [3, 6], "reward": { "force": 4 } }
+  ],
+  "reward_choices": 3,
+  "reward_pool": ["house", "field", "mill", "barracks", "tower", "wall", "mine", "smithy", "market"],
+  "threats": [
+    { "name": "Набег соседей",      "fields": 4, "need": { "force": 10, "gold": 6 } },
+    { "name": "Неурожайная зима",   "fields": 4, "need": { "food": 25 } },
+    { "name": "Войско барона",      "fields": 4, "need": { "force": 22, "gold": 12 } },
+    { "name": "Мор и голод",        "fields": 4, "need": { "food": 35, "gold": 20 } },
+    { "name": "Осада короля",       "fields": 4, "need": { "force": 40, "gold": 30, "food": 20 } }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "_help": "Комбо соседства. building — кто получает бонус. neighbor — кто должен стоять рядом (строка или список). min — сколько соседей нужно. per: true — бонус за каждого такого соседа. diagonal: true — считать и диагональных соседей.",
+  "combos": [
+    { "building": "house",    "neighbor": "field", "min": 1,              "bonus": { "food": 3 },              "text": "Домик рядом с полем: +3 еды" },
+    { "building": "mill",     "neighbor": "field", "min": 2,              "bonus": { "food": 10 },             "text": "Мельница рядом с 2 полями: +10 еды" },
+    { "building": "barracks", "neighbor": "house", "min": 1,              "bonus": { "force": 3 },             "text": "Казармы рядом с домиком: +3 силы" },
+    { "building": "tower",    "neighbor": "wall",  "min": 1,              "bonus": { "force": 3 },             "text": "Башня рядом со стеной: +3 силы" },
+    { "building": "wall",     "neighbor": ["wall", "tower"], "per": true, "bonus": { "force": 1 },             "text": "Стена: +1 силы за каждую соседнюю стену или башню" },
+    { "building": "smithy",   "neighbor": "mine",  "min": 1,              "bonus": { "gold": 3, "force": 2 },  "text": "Кузница рядом с рудником: +3 золота, +2 силы" },
+    { "building": "market",   "neighbor": "house", "per": true,           "bonus": { "gold": 2 },              "text": "Рынок: +2 золота за каждый соседний домик" }
+  ]
+}
