@@ -110,6 +110,32 @@ func best_totals(data, hand: Array) -> Dictionary:
 	return ctx["best"]
 
 
+## Лучшая расстановка руки по взвешенной сумме ресурсов (для бота и будущих подсказок).
+## bonus_fn(total: Dictionary) -> float — дополнительные очки (например, за выполнение задания).
+## Возвращает клетки поля после лучшей расстановки.
+func best_arrangement(data, hand: Array, weights: Dictionary, bonus_fn: Callable = Callable()) -> Array:
+	var cards := hand.duplicate()
+	cards.sort()
+	var ctx := {
+		"res": data.resources.keys(),
+		"rules": _rules_by_building(data),
+		"yields": {},
+		"nbr": [],
+		"best": data.zero_resources(),
+		"weights": weights,
+		"best_score": -INF,
+		"best_cells": cells.duplicate(),
+	}
+	if bonus_fn.is_valid():
+		ctx["bonus_fn"] = bonus_fn
+	for id in data.buildings:
+		ctx["yields"][id] = data.buildings[id].get("yield", {})
+	for i in CELL_COUNT:
+		ctx["nbr"].append([neighbors(i, false), neighbors(i, true)])
+	_search(ctx, cards, 0, free_cells().size(), -1)
+	return ctx["best_cells"]
+
+
 func _rules_by_building(data) -> Dictionary:
 	var out := {}
 	for rule in data.combos:
@@ -173,6 +199,16 @@ func _fast_score(ctx: Dictionary) -> void:
 	for res in total:
 		if total[res] > best[res]:
 			best[res] = total[res]
+	if ctx.has("weights"):
+		var score := 0.0
+		var w: Dictionary = ctx["weights"]
+		for res in total:
+			score += total[res] * float(w.get(res, 1.0))
+		if ctx.has("bonus_fn"):
+			score += ctx["bonus_fn"].call(total)
+		if score > ctx["best_score"]:
+			ctx["best_score"] = score
+			ctx["best_cells"] = cells.duplicate()
 
 
 ## Клетки-соседи, которые участвуют в правиле для клетки i.

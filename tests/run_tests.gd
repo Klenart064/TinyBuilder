@@ -22,6 +22,7 @@ func _initialize() -> void:
 	test_undo()
 	test_solver()
 	test_generated_goals_solvable()
+	test_paths()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -37,8 +38,11 @@ func test_house_field() -> void:
 	b.cells[0] = "house"
 	b.cells[1] = "field"
 	var t: Dictionary = b.evaluate(data)["total"]
-	# домик 1 + поле 1 + комбо 3
-	_check(t["food"] == 5, "домик+поле = 5 еды (получили %d)" % t["food"])
+	_check(t["food"] == 4, "домик+поле = 4 еды (получили %d)" % t["food"])
+	b = Board.new()
+	b.cells[4] = "house"
+	t = b.evaluate(data)["total"]
+	_check(t["food"] == 0, "одинокое здание без комбо даёт 0")
 
 
 func test_mill_two_fields() -> void:
@@ -46,13 +50,13 @@ func test_mill_two_fields() -> void:
 	b.cells[4] = "mill"
 	b.cells[1] = "field"
 	var t: Dictionary = b.evaluate(data)["total"]
-	_check(t["food"] == 1, "мельница с одним полем не срабатывает")
+	_check(t["food"] == 0, "мельница с одним полем не срабатывает")
 	b.cells[3] = "field"
 	t = b.evaluate(data)["total"]
-	_check(t["food"] == 12, "мельница + 2 поля = 12 еды (получили %d)" % t["food"])
-	b.cells[0] = "field"  # диагональ — не сосед мельнице
+	_check(t["food"] == 10, "мельница + 2 поля = 10 еды (получили %d)" % t["food"])
+	b.cells[0] = "field"  # диагональ — не сосед мельнице, но сосед полям
 	t = b.evaluate(data)["total"]
-	_check(t["food"] == 13, "диагональ не считается соседом")
+	_check(t["food"] == 18, "поле в углу: +4 себе, +2 каждому соседнему полю, мельнице ничего (получили %d)" % t["food"])
 
 
 func test_per_neighbor() -> void:
@@ -61,7 +65,11 @@ func test_per_neighbor() -> void:
 	b.cells[1] = "house"
 	b.cells[3] = "house"
 	var t: Dictionary = b.evaluate(data)["total"]
-	_check(t["gold"] == 5, "рынок с 2 домиками = 1 + 2×2 = 5 золота (получили %d)" % t["gold"])
+	_check(t["gold"] == 6, "рынок с 2 домиками = 2×3 = 6 золота (получили %d)" % t["gold"])
+	b = Board.new()
+	b.cells[0] = "rock"
+	b.cells[1] = "mine"
+	_check(b.evaluate(data)["total"]["gold"] == 4, "рудник рядом со скалой = 4 золота")
 
 
 func test_preview() -> void:
@@ -103,14 +111,14 @@ func test_undo() -> void:
 func test_solver() -> void:
 	var b = Board.new()
 	var best: Dictionary = b.best_totals(data, ["field", "mill", "field"])
-	_check(best["food"] == 12, "перебор находит мельницу между двумя полями (12 еды, получили %d)" % best["food"])
+	_check(best["food"] == 10, "перебор находит мельницу между двумя полями (10 еды, получили %d)" % best["food"])
 	b.cells[4] = "rock"
 	b.cells[1] = "rock"
 	b.cells[3] = "rock"
 	b.cells[5] = "rock"
 	b.cells[7] = "rock"
 	best = b.best_totals(data, ["field", "mill", "field"])
-	_check(best["food"] == 2, "если соседей нет, комбо не собрать (получили %d)" % best["food"])
+	_check(best["food"] == 0, "если соседей нет, комбо не собрать (получили %d)" % best["food"])
 
 
 func test_generated_goals_solvable() -> void:
@@ -131,6 +139,21 @@ func test_generated_goals_solvable() -> void:
 				break
 			run.next_field()
 	_check(ok, "сгенерированные задания решаемы, в центре нет камня")
+
+
+func test_paths() -> void:
+	var run = RunState.new()
+	run.start(data, 5)
+	run.finish_field()
+	var opts: Array = run.make_path_options()
+	_check(opts.size() == 2, "после поля два варианта пути")
+	_check(opts[0]["hand"] == opts[1]["hand"], "рука одна на оба варианта")
+	var wild: Dictionary = opts[1]["goal"]
+	_check(wild.get("card_reward", false), "опасный путь даёт карту за задание")
+	run.choose_path(1)
+	_check(run.field_number == 2 and run.goal == wild, "выбранный путь становится полем")
+	var f: Dictionary = run.threat_forecast()
+	_check(f.size() > 0 and f.values()[0].has("per_field"), "есть прогноз угрозы")
 
 
 func _check(cond: bool, label: String) -> void:

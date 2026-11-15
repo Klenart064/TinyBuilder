@@ -33,7 +33,8 @@ func _initialize() -> void:
 			if not run.reward_options.is_empty():
 				run.choose_reward(_best_reward(run))
 			if not run.game_over:
-				run.next_field()
+				run.make_path_options()
+				run.choose_path(run.rng.randi_range(0, run.path_options.size() - 1))
 		threats_beaten[run.threat_index] = threats_beaten.get(run.threat_index, 0) + 1
 		if run.victory:
 			wins += 1
@@ -55,29 +56,17 @@ func _best_reward(run) -> int:
 	return run.rng.randi_range(0, run.reward_options.size() - 1)
 
 
+## Бот находит лучшую расстановку всей руки (перебором) с учётом угрозы и задания.
 func _play_greedy(run) -> void:
 	var threat: Dictionary = run.current_threat()
 	var need: Dictionary = threat.get("need", {})
-	while not run.hand.is_empty():
-		var best_score := -1.0
-		var best := [-1, -1]
-		for hi in run.hand.size():
-			for cell in run.board.free_cells():
-				var d: Dictionary = run.board.preview_delta(run.data, cell, run.hand[hi])
-				var score := 0.0
-				for res in d:
-					var w := 1.0
-					if need.has(res) and run.stock.get(res, 0) < need[res]:
-						w = 2.0
-					score += d[res] * w
-				# задание поля
-				var gr: String = run.goal["resource"]
-				var cur: int = run.goal_progress()
-				if cur < run.goal["target"] and cur + d.get(gr, 0) >= run.goal["target"]:
-					score += 8.0
-				if score > best_score:
-					best_score = score
-					best = [hi, cell]
-		if best[0] < 0:
-			return
-		run.place(best[0], best[1])
+	var weights := {}
+	for res in run.data.resources:
+		weights[res] = 2.0 if need.has(res) and run.stock.get(res, 0) < need[res] else 1.0
+	var gr: String = run.goal["resource"]
+	var target: int = run.goal["target"]
+	var cells: Array = run.board.best_arrangement(run.data, run.hand, weights,
+		func(total): return 8.0 if total.get(gr, 0) >= target else 0.0)
+	for cell in cells.size():
+		if run.board.cells[cell] == "" and cells[cell] != "":
+			run.place(run.hand.find(cells[cell]), cell)

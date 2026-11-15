@@ -21,8 +21,14 @@ var fields_until_threat := 0
 var history: Array = []
 var game_over := false
 var victory := false
-## Карты на выбор после отбитой угрозы (пусто, если выбирать нечего).
+## Карты на выбор после отбитой угрозы или опасного поля (пусто, если выбирать нечего).
 var reward_options: Array = []
+## Варианты следующего поля (выбор пути), см. make_path_options().
+var path_options: Array = []
+## Путь текущего поля (описание из run.json "paths") или {}.
+var path: Dictionary = {}
+## Сколько ресурсов пришло в запасы за каждое поле (для прогноза угрозы).
+var income_history: Array = []
 
 
 func start(data_, seed_value: int = -1) -> void:
@@ -39,61 +45,128 @@ func start(data_, seed_value: int = -1) -> void:
 	game_over = false
 	victory = false
 	reward_options = []
+	path_options = []
+	income_history = []
 	var t = current_threat()
 	fields_until_threat = int(t.get("fields", 4))
 	next_field()
 
 
-## Новое поле. Рука тянется первой, потом генератор подбирает поле и задание под неё:
-## задание всегда выполнимо этой рукой, а его сложность растёт с номером поля.
+## Новое поле без выбора пути (первое поле забега и бот без выбора).
 func next_field() -> void:
+	var f := generate_field(deck.draw(_rand_range(data.run.get("hand_size", [3, 5]))), {}, field_number + 1)
+	_enter_field(f)
+
+
+## Готовит варианты следующего поля (выбор пути). Рука одна на все варианты:
+## её видно заранее, отличаются поле, задание и награда.
+func make_path_options() -> Array:
+	var next_hand: Array = deck.draw(_rand_range(data.run.get("hand_size", [3, 5])))
+	path_options = []
+	for def in data.run.get("paths", []):
+		path_options.append(generate_field(next_hand, def, field_number + 1))
+	if path_options.is_empty():
+		path_options.append(generate_field(next_hand, {}, field_number + 1))
+	return path_options
+
+
+func choose_path(index: int) -> void:
+	var f: Dictionary = path_options[clampi(index, 0, path_options.size() - 1)]
+	path_options = []
+	_enter_field(f)
+
+
+func _enter_field(f: Dictionary) -> void:
 	field_number += 1
 	history.clear()
-	hand = deck.draw(_rand_range(data.run.get("hand_size", [3, 5])))
+	hand = f["hand"]
+	board = f["board"]
+	goal = f["goal"]
+	path = f["path"]
+
+
+## Генерирует поле и задание под руку: задание всегда выполнимо этой рукой,
+## сложность растёт с номером поля и зависит от пути.
+## Возвращает {"hand", "board", "goal", "path"}.
+func generate_field(field_hand: Array, path_def: Dictionary, number: int) -> Dictionary:
 	var gen: Dictionary = data.run.get("generation", {})
 	var attempts := int(gen.get("max_attempts", 10))
-	for attempt in attempts:
-		_generate_board(gen)
-		if not _has_free_pair():
+	var b = null
+	var g := {}
+	for _attempt in attempts:
+		b = _generate_board(gen, path_def)
+		if not _has_free_pair(b):
 			continue
-		if _pick_goal(board.best_totals(data, hand)):
-			return
-	# Не нашли хорошее поле — берём пустое, на нём задание точно решаемо.
-	board = Board.new()
-	if not _pick_goal(board.best_totals(data, hand)):
-		_fallback_goal(board.best_totals(data, hand))
+		g = _pick_goal(b.best_totals(data, field_hand), path_def, number)
+		if not g.is_empty():
+			break
+	if g.is_empty():
+		# Не нашли хорошее поле — берём пустое, на нём собрать комбо проще всего.
+		b = Board.new()
+		var best: Dictionary = b.best_totals(data, field_hand)
+		g = _pick_goal(best, path_def, number)
+		if g.is_empty():
+			g = _fallback_goal(best)
+	return {"hand": field_hand, "board": b, "goal": g, "path": path_def}
 
 
-func _generate_board(gen: Dictionary) -> void:
-	board = Board.new()
+func _generate_board(gen: Dictionary, path_def: Dictionary):
+	var b = Board.new()
 	var forbidden: Array = []
 	for c in gen.get("rock_forbidden_cells", [4]):
 		forbidden.append(int(c))  # JSON отдаёт числа как float
-	_place_random("rock", _rand_range(data.run.get("rock_cells", [0, 0])), forbidden)
+	var rocks = path_def.get("rock_cells", data.run.get("rock_cells", [0, 0]))
+	_place_random(b, "rock", _rand_range(rocks), forbidden)
 	var pool: Array = data.run.get("prebuilt_pool", [])
 	for _k in _rand_range(data.run.get("prebuilt_cells", [0, 0])):
 		if pool.is_empty():
 			break
-		_place_random(pool[rng.randi_range(0, pool.size() - 1)], 1, [])
+		_place_random(b, pool[rng.randi_range(0, pool.size() - 1)], 1, [])
+	return b
 
 
 ## Есть ли хотя бы две свободные соседние клетки (место под комбо).
-func _has_free_pair() -> bool:
-	for i in board.free_cells():
+func _has_free_pair(b) -> bool:
+	for i in b.free_cells():
 		for n in Board.neighbors(i):
-			if board.is_free(n):
+			if b.is_free(n):
 				return true
 	return false
 
 
 ## Доля от максимально возможного результата, которую требует задание.
-func goal_difficulty() -> float:
+func goal_difficulty(number: int, shift: float = 0.0) -> float:
 	var gen: Dictionary = data.run.get("generation", {})
 	var d: Array = gen.get("goal_difficulty", [0.6, 0.95])
 	var ramp := float(gen.get("difficulty_ramp_fields", 16))
-	var t := clampf(float(field_number - 1) / maxf(ramp, 1.0), 0.0, 1.0)
+	var t := clampf(float(number - 1) / maxf(ramp, 1.0), 0.0, 1.0)
 	var spread := float(gen.get("goal_difficulty_spread", 0.1))
-	return clampf(lerpf(float(d[0]), float(d[1]), t) + rng.randf_range(-spread, spread), 0.0, 1.0)
+	return clampf(lerpf(float(d[0]), float(d[1]), t) + shift + rng.randf_range(-spread, spread), 0.0, 1.0)
+
+
+## Прогноз по текущей угрозе: для каждого ресурса — сколько есть, сколько нужно,
+## сколько в среднем надо набирать за оставшиеся поля и сколько игрок набирает сейчас.
+func threat_forecast() -> Dictionary:
+	var out := {}
+	var t := current_threat()
+	var need: Dictionary = t.get("need", {})
+	var left := maxi(fields_until_threat, 1)
+	for res in need:
+		var have := int(stock.get(res, 0))
+		var missing := maxi(int(need[res]) - have, 0)
+		var avg := 0.0
+		if not income_history.is_empty():
+			for inc in income_history:
+				avg += float(inc.get(res, 0))
+			avg /= income_history.size()
+		out[res] = {
+			"have": have,
+			"need": int(need[res]),
+			"per_field": float(missing) / left,
+			"avg": avg,
+			"has_history": not income_history.is_empty(),
+		}
+	return out
 
 
 func can_place(hand_index: int, cell: int) -> bool:
@@ -149,8 +222,14 @@ func finish_field() -> Dictionary:
 	var goal_done := int(total.get(goal["resource"], 0)) >= int(goal["target"])
 	report["goal"] = goal.duplicate(true)
 	report["goal_done"] = goal_done
+	var gained: Dictionary = total.duplicate()
 	if goal_done:
 		_add_stock(goal["reward"], 1)
+		for res in goal["reward"]:
+			gained[res] = int(gained.get(res, 0)) + int(goal["reward"][res])
+		if goal.get("card_reward", false):
+			reward_options = _roll_rewards()
+	income_history.append(gained)
 
 	# Сыгранные и несыгранные карты уходят в сброс. Заранее построенное — не карты игрока.
 	var used := []
@@ -171,8 +250,8 @@ func finish_field() -> Dictionary:
 		if passed:
 			_add_stock(need, -1)
 			threat_index += 1
-			reward_options = _roll_rewards()
-			report["rewards"] = reward_options.duplicate()
+			if reward_options.is_empty():
+				reward_options = _roll_rewards()
 			var next := current_threat()
 			if next.is_empty():
 				victory = true
@@ -181,6 +260,7 @@ func finish_field() -> Dictionary:
 				fields_until_threat = int(next.get("fields", 4))
 		else:
 			game_over = true
+	report["rewards"] = reward_options.duplicate()
 	report["stock"] = stock.duplicate()
 	return report
 
@@ -216,27 +296,32 @@ func _add_stock(amounts: Dictionary, sign_: int) -> void:
 		stock[res] = int(stock.get(res, 0)) + int(amounts[res]) * sign_
 
 
-## Выбирает задание, которое можно выполнить этой рукой. false — подходящих нет.
-func _pick_goal(best: Dictionary) -> bool:
+## Выбирает задание, которое можно выполнить этой рукой. {} — подходящих нет.
+func _pick_goal(best: Dictionary, path_def: Dictionary, number: int) -> Dictionary:
 	var options := []
 	for g in data.run.get("goals", []):
 		if int(best.get(g["resource"], 0)) >= int(g.get("min_target", 1)):
 			options.append(g)
 	if options.is_empty():
-		return false
+		return {}
 	var g: Dictionary = options[rng.randi_range(0, options.size() - 1)]
 	var top := int(best[g["resource"]])
-	var target := clampi(roundi(top * goal_difficulty()), int(g.get("min_target", 1)), top)
-	goal = {
+	var diff := goal_difficulty(number, float(path_def.get("difficulty_shift", 0.0)))
+	var target := clampi(roundi(top * diff), int(g.get("min_target", 1)), top)
+	var reward := {}
+	var mult := float(path_def.get("reward_mult", 1.0))
+	for res in g.get("reward", {}):
+		reward[res] = roundi(float(g["reward"][res]) * mult)
+	return {
 		"resource": g["resource"],
 		"target": target,
 		"best": top,
-		"reward": g.get("reward", {}).duplicate(),
+		"reward": reward,
+		"card_reward": path_def.get("card_reward", false),
 	}
-	return true
 
 
-func _fallback_goal(best: Dictionary) -> void:
+func _fallback_goal(best: Dictionary) -> Dictionary:
 	var res: String = data.resources.keys()[0]
 	for r in best:
 		if int(best[r]) > int(best[res]):
@@ -245,20 +330,20 @@ func _fallback_goal(best: Dictionary) -> void:
 	var goals: Array = data.run.get("goals", [])
 	if not goals.is_empty():
 		reward = goals[0].get("reward", {}).duplicate()
-	goal = {"resource": res, "target": maxi(int(best[res]), 0), "best": int(best[res]), "reward": reward}
+	return {"resource": res, "target": maxi(int(best[res]), 0), "best": int(best[res]), "reward": reward, "card_reward": false}
 
 
-func _place_random(id: String, count: int, forbidden: Array) -> void:
+func _place_random(b, id: String, count: int, forbidden: Array) -> void:
 	for _k in count:
 		var free: Array = []
-		for c in board.free_cells():
+		for c in b.free_cells():
 			if not (c in forbidden):
 				free.append(c)
-		if board.free_cells().size() <= 4 or free.is_empty():
+		if b.free_cells().size() <= 4 or free.is_empty():
 			return  # оставляем место для игры
 		var cell: int = free[rng.randi_range(0, free.size() - 1)]
-		board.cells[cell] = id
-		board.prebuilt[cell] = true
+		b.cells[cell] = id
+		b.prebuilt[cell] = true
 
 
 func _rand_range(r) -> int:

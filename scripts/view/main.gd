@@ -326,11 +326,36 @@ func _update_yield_labels() -> void:
 			tint = Color(1, 0.9, 0.45) if preview_by_cell[i]["combo"] else Color(1, 1, 1, 0.65)
 			h = 1.6 if i == hover_cell else 0.45
 		holder.position = cell_pos(i) + Vector3(0, h, 0)
-		holder.add_child(_make_badge(amounts, 34, tint, 5))
+		var id: String = run.board.cells[i]
+		var empty := true
+		for res in amounts:
+			if int(amounts[res]) != 0:
+				empty = false
+		if empty and not preview_by_cell.has(i) and id != "" and not data.buildings[id].get("blocked", false):
+			holder.add_child(_zero_badge())
+		else:
+			holder.add_child(_make_badge(amounts, 34, tint, 5))
 	_update_combo_links(prod)
 
 
 ## Значок «+3 [иконка]» над клеткой: строка на ресурс, всегда смотрит в камеру.
+## Серый «0» над зданием, у которого не сработало ни одно комбо.
+func _zero_badge() -> Node3D:
+	var root := Node3D.new()
+	var lbl := Label3D.new()
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.no_depth_test = true
+	lbl.render_priority = 5
+	lbl.font_size = 34
+	lbl.outline_size = 12
+	lbl.outline_modulate = Color(0, 0, 0, 0.8)
+	lbl.pixel_size = 0.006
+	lbl.text = "0"
+	lbl.modulate = Color("#9aa4ae")
+	root.add_child(lbl)
+	return root
+
+
 func _make_badge(amounts: Dictionary, font_size: int, tint: Color, priority: int) -> Node3D:
 	var root := Node3D.new()
 	var lines := []
@@ -645,6 +670,13 @@ func _build_ui() -> void:
 	root.add_child(toast)
 
 
+## 2.5 → «2.5», 3.0 → «3»
+static func _num(v: float) -> String:
+	if absf(v - roundf(v)) < 0.05:
+		return str(int(roundf(v)))
+	return "%.1f" % v
+
+
 func _label(text: String, size: int, color: Color) -> Label:
 	var l := Label.new()
 	l.text = text
@@ -877,9 +909,12 @@ func _refresh_info() -> void:
 	# Задание поля
 	var g: Dictionary = run.goal
 	var progress := int(total.get(g["resource"], 0))
-	var goal_box := _section("Задание поля", Color("#6fcf97") if progress >= int(g["target"]) else Color("#8a96a3"))
+	var goal_title := "Задание поля"
+	if not run.path.is_empty():
+		goal_title += " · " + run.path.get("title", "")
+	var goal_box := _section(goal_title, Color("#6fcf97") if progress >= int(g["target"]) else Color("#8a96a3"))
 	goal_box.add_child(_progress_row(g["resource"], progress, int(g["target"]), progress >= int(g["target"])))
-	goal_box.add_child(_rich_line("[color=#8a96a3]Награда:[/color] %s" % _fmt(g["reward"], true)))
+	goal_box.add_child(_rich_line("[color=#8a96a3]Награда:[/color] %s%s" % [_fmt(g["reward"], true), " + новая карта" if g.get("card_reward", false) else ""]))
 	info_box.add_child(goal_box.get_parent())
 
 	# Угроза
@@ -888,10 +923,19 @@ func _refresh_info() -> void:
 		var n: int = run.fields_until_threat
 		var when := "после этого поля!" if n == 1 else "через %d %s" % [n, _plural(n, "поле", "поля", "полей")]
 		var tb := _section("Угроза %d/%d: %s — %s" % [run.threat_index + 1, data.run["threats"].size(), t["name"], when], Color("#eb5757"))
-		var need: Dictionary = t["need"]
-		for res in need:
-			var have := int(run.stock.get(res, 0))
-			tb.add_child(_progress_row(res, have, int(need[res]), have >= int(need[res])))
+		var forecast: Dictionary = run.threat_forecast()
+		for res in forecast:
+			var f: Dictionary = forecast[res]
+			var done: bool = f["have"] >= f["need"]
+			tb.add_child(_progress_row(res, f["have"], f["need"], done))
+			if done:
+				continue
+			# Темп: средний доход за прошлые поля, а на первом поле — то, что даёт текущее
+			var rate: float = f["avg"] if f["has_history"] else float(total.get(res, 0))
+			var ok: bool = rate >= f["per_field"]
+			tb.add_child(_rich_line("[font_size=12][color=#8a96a3]нужно ≈%s%s за поле, сейчас ≈%s[/color] %s[/font_size]" % [
+				_num(f["per_field"]), _img(res, 14), _num(rate),
+				"[color=#6fcf97]успеваешь[/color]" if ok else "[color=#eb5757]не успеваешь[/color]"]))
 		info_box.add_child(tb.get_parent())
 
 	var known := 0
@@ -904,12 +948,16 @@ func _refresh_info() -> void:
 			book_lines += "[color=#6b7683]☆ %s + ???[/color]\n" % data.building_name(rule["building"])
 	var r := "[b]Книга комбо[/b] %d/%d\n[color=#8a96a3]соседи — только по сторонам[/color]\n" % [known, data.combos.size()]
 	r += book_lines
-	r += "\n[b]Базовый доход[/b]\n"
+	var base := ""
 	for id in data.buildings:
 		var b: Dictionary = data.buildings[id]
-		if b.get("blocked", false):
+		if b.get("blocked", false) or b.get("yield", {}).is_empty():
 			continue
-		r += "%s: %s\n" % [b["name"], _fmt(b.get("yield", {}), true)]
+		base += "%s: %s\n" % [b["name"], _fmt(b["yield"], true)]
+	if base == "":
+		r += "\n[color=#8a96a3]Ресурсы дают только комбо: здание без соседей-партнёров приносит 0.[/color]\n"
+	else:
+		r += "\n[b]Базовый доход[/b]\n" + base
 	r += "\n[color=#8a96a3]ЛКМ по карте/1–5 — выбрать, ЛКМ по клетке — построить, ПКМ/Esc — снять выбор[/color]"
 	rules_text.text = r
 
@@ -957,7 +1005,7 @@ func _card_button(i: int, id: String) -> Button:
 	var title := _card_label("[%d] %s" % [i + 1, b["name"]], 15, Color.WHITE)
 	v.add_child(title)
 	if b.get("yield", {}).is_empty():
-		v.add_child(_card_label("сама ничего", 12, Color("#8a96a3")))
+		v.add_child(_card_label("одна: 0", 12, Color("#8a96a3")))
 	else:
 		v.add_child(_amount_row(b["yield"], 14))
 	var partners: Array = data.partners_of(id)
@@ -1141,20 +1189,68 @@ func _on_finish() -> void:
 			var id: String = run.reward_options[i]
 			_overlay_button(data.building_name(id), _on_reward.bind(i))
 	else:
-		_overlay_button("Следующее поле", _on_next_field)
+		s += _path_choice_text()
 	_refresh()
 	_show_overlay(s)
 
 
 func _on_reward(i: int) -> void:
 	run.choose_reward(i)
-	_on_next_field()
+	_clear_overlay_buttons()
+	_show_overlay("[center][b][font_size=22]Карта добавлена в колоду[/font_size][/b][/center]" + _path_choice_text())
 
 
-func _on_next_field() -> void:
-	run.next_field()
+## Готовит варианты следующего поля, добавляет кнопки и возвращает текст над ними.
+func _path_choice_text() -> String:
+	var opts: Array = run.make_path_options()
+	var names := []
+	for id in opts[0]["hand"]:
+		names.append(data.building_name(id))
+	var s := "\n\n[center][b][font_size=20]Куда дальше?[/font_size][/b]\nРука на следующее поле: %s[/center]" % ", ".join(names)
+	for i in opts.size():
+		var o: Dictionary = opts[i]
+		var p: Dictionary = o["path"]
+		var g: Dictionary = o["goal"]
+		var rocks := 0
+		for c in o["board"].cells:
+			if c == "rock":
+				rocks += 1
+		var bb := "[center][b][font_size=17]%s[/font_size][/b][/center]\n" % p.get("title", "Следующее поле")
+		bb += "[font_size=12][color=#8a96a3]%s[/color][/font_size]\n" % p.get("desc", "")
+		bb += "Задание: %d%s\n" % [g["target"], _img(g["resource"])]
+		bb += "Награда: %s%s\n" % [_fmt(g["reward"], true), " + карта" if g.get("card_reward", false) else ""]
+		bb += "[color=#8a96a3]Камней: %d[/color]" % rocks
+		_choice_button(bb, _on_path.bind(i))
+	return s
+
+
+func _on_path(i: int) -> void:
+	run.choose_path(i)
 	_hide_overlay()
 	_refresh()
+
+
+func _choice_button(bb: String, cb: Callable) -> void:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(250, 160)
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(cb)
+	var m := MarginContainer.new()
+	m.set_anchors_preset(Control.PRESET_FULL_RECT)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		m.add_theme_constant_override("margin_" + side, 10)
+	b.add_child(m)
+	var r := RichTextLabel.new()
+	r.bbcode_enabled = true
+	r.fit_content = true
+	r.scroll_active = false
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.add_theme_font_size_override("normal_font_size", 15)
+	r.add_theme_font_size_override("bold_font_size", 15)
+	r.text = bb
+	m.add_child(r)
+	overlay_buttons.add_child(b)
 
 
 func _show_overlay(text: String) -> void:
