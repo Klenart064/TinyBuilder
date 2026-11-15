@@ -20,6 +20,8 @@ func _initialize() -> void:
 	test_preview()
 	test_run_flow()
 	test_undo()
+	test_solver()
+	test_generated_goals_solvable()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -96,6 +98,39 @@ func test_undo() -> void:
 	_check(run.undo(), "отмена работает")
 	_check(run.hand.size() == n and run.hand[0] == card, "карта вернулась в руку")
 	_check(run.board.is_free(cell), "клетка освободилась")
+
+
+func test_solver() -> void:
+	var b = Board.new()
+	var best: Dictionary = b.best_totals(data, ["field", "mill", "field"])
+	_check(best["food"] == 12, "перебор находит мельницу между двумя полями (12 еды, получили %d)" % best["food"])
+	b.cells[4] = "rock"
+	b.cells[1] = "rock"
+	b.cells[3] = "rock"
+	b.cells[5] = "rock"
+	b.cells[7] = "rock"
+	best = b.best_totals(data, ["field", "mill", "field"])
+	_check(best["food"] == 2, "если соседей нет, комбо не собрать (получили %d)" % best["food"])
+
+
+func test_generated_goals_solvable() -> void:
+	var ok := true
+	for seed_value in 40:
+		var run = RunState.new()
+		run.start(data, seed_value)
+		for _f in 3:
+			var best: Dictionary = run.board.best_totals(data, run.hand)
+			if int(run.goal["target"]) > int(best[run.goal["resource"]]):
+				print("    seed %d: цель %s, максимум %s, рука %s" % [seed_value, run.goal, best, run.hand])
+				ok = false
+			if run.board.cells[4] == "rock":
+				print("    seed %d: камень в центре %s" % [seed_value, run.board.cells])
+				ok = false
+			run.finish_field()
+			if run.game_over:
+				break
+			run.next_field()
+	_check(ok, "сгенерированные задания решаемы, в центре нет камня")
 
 
 func _check(cond: bool, label: String) -> void:

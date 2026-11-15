@@ -5,15 +5,19 @@ extends Node3D
 const GameData = preload("res://scripts/core/game_data.gd")
 const RunState = preload("res://scripts/core/run_state.gd")
 const Board = preload("res://scripts/core/board.gd")
+const ComboBook = preload("res://scripts/core/combo_book.gd")
 
 const CELL_STEP := 1.15
 const TILE_COLOR := Color("#5d7a3a")
 const TILE_FREE_COLOR := Color("#7fa04f")
 const TILE_HOVER_COLOR := Color("#a8cf6a")
 const TILE_BAD_COLOR := Color("#7a4a3a")
+const TILE_COMBO_COLOR := Color("#e8c547")
+const COMBO_LINK_COLOR := Color("#ffd866")
 
 var data
 var run
+var book = ComboBook.new()
 
 var selected := -1
 var hover_cell := -1
@@ -27,6 +31,12 @@ var building_ids: Array = []
 var yield_labels: Array = []
 var ghost: Node3D
 var ghost_id := ""
+var combo_links: Node3D
+var preview_links: Node3D
+## Предпросмотр для выбранной карты: клетка -> {"delta": {}, "combo": bool}
+var preview_by_cell: Dictionary = {}
+## Клетки-партнёры комбо, которые сработают при постановке в клетку под курсором.
+var hover_partners: Array = []
 
 # UI
 var info_text: RichTextLabel
@@ -38,6 +48,7 @@ var finish_btn: Button
 var overlay: Control
 var overlay_text: RichTextLabel
 var overlay_buttons: HBoxContainer
+var toast: Label
 
 
 func _ready() -> void:
@@ -45,6 +56,7 @@ func _ready() -> void:
 	if not data.load_all():
 		push_error("Ошибка в файлах data/*.json — смотрите вывод выше")
 	run = RunState.new()
+	book.load_book()
 	_build_world()
 	_build_ui()
 	_new_run()
@@ -107,6 +119,7 @@ func _build_world() -> void:
 		var lbl := Label3D.new()
 		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		lbl.no_depth_test = true
+		lbl.render_priority = 5
 		lbl.font_size = 34
 		lbl.outline_size = 14
 		lbl.outline_modulate = Color(0, 0, 0, 0.85)
@@ -117,6 +130,11 @@ func _build_world() -> void:
 
 		building_nodes.append(null)
 		building_ids.append("")
+
+	combo_links = Node3D.new()
+	add_child(combo_links)
+	preview_links = Node3D.new()
+	add_child(preview_links)
 
 
 func cell_pos(i: int) -> Vector3:
@@ -234,13 +252,71 @@ func _update_ghost() -> void:
 
 
 func _update_tiles() -> void:
+	_update_hover_partners()
 	for i in Board.CELL_COUNT:
 		var c := TILE_COLOR
 		if selected >= 0 and run.board.is_free(i):
-			c = TILE_HOVER_COLOR if i == hover_cell else TILE_FREE_COLOR
+			c = TILE_FREE_COLOR
+			if preview_by_cell.get(i, {}).get("combo", false):
+				c = TILE_FREE_COLOR.lerp(TILE_COMBO_COLOR, 0.45)
+			if i == hover_cell:
+				c = TILE_HOVER_COLOR
 		elif selected >= 0 and i == hover_cell:
 			c = TILE_BAD_COLOR
+		if i in hover_partners:
+			c = TILE_COMBO_COLOR
 		tile_materials[i].albedo_color = c
+
+
+## Считает, что даст выбранная карта в каждой свободной клетке.
+func _update_preview() -> void:
+	preview_by_cell = {}
+	if selected < 0 or selected >= run.hand.size():
+		return
+	var id: String = run.hand[selected]
+	var base_sum := 0
+	for res in data.buildings[id].get("yield", {}):
+		base_sum += int(data.buildings[id]["yield"][res])
+	for i in run.board.free_cells():
+		var d: Dictionary = run.board.preview_delta(data, i, id)
+		var total := 0
+		for res in d:
+			total += int(d[res])
+		preview_by_cell[i] = {"delta": d, "combo": total > base_sum}
+
+
+## Какие клетки-соседи «включатся», если поставить выбранную карту под курсор.
+func _update_hover_partners() -> void:
+	hover_partners = []
+	for c in preview_links.get_children():
+		c.queue_free()
+	if selected < 0 or selected >= run.hand.size() or not run.board.is_free(hover_cell):
+		return
+	var before := _combo_keys(run.production())
+	run.board.cells[hover_cell] = run.hand[selected]
+	var after: Dictionary = run.production()
+	run.board.cells[hover_cell] = ""
+	for i in Board.CELL_COUNT:
+		for c in after["cells"][i]["combos"]:
+			if before.has(_combo_key(i, c)):
+				continue
+			for p in c["partners"]:
+				preview_links.add_child(_link_mesh(i, p, 0.16, 0.2, _glow_mat(COMBO_LINK_COLOR, 0.75)))
+			for p in [i] + c["partners"]:
+				if p != hover_cell and not (p in hover_partners):
+					hover_partners.append(p)
+
+
+func _combo_key(cell: int, c: Dictionary) -> String:
+	return "%d:%s:%s" % [cell, c["id"], str(c["bonus"])]
+
+
+func _combo_keys(prod: Dictionary) -> Dictionary:
+	var keys := {}
+	for i in Board.CELL_COUNT:
+		for c in prod["cells"][i]["combos"]:
+			keys[_combo_key(i, c)] = true
+	return keys
 
 
 func _update_yield_labels() -> void:
@@ -255,8 +331,161 @@ func _update_yield_labels() -> void:
 				if lines.is_empty():
 					col = Color(data.resources[res]["color"])
 				lines.append("+%d %s" % [v, data.resources[res]["short"]])
+		if preview_by_cell.has(i):
+			var d: Dictionary = preview_by_cell[i]["delta"]
+			lines = []
+			for res in data.resources:
+				var v := int(d.get(res, 0))
+				if v != 0:
+					lines.append("%s%d %s" % ["+" if v > 0 else "", v, data.resources[res]["short"]])
+			col = Color(1, 0.9, 0.4, 0.95) if preview_by_cell[i]["combo"] else Color(1, 1, 1, 0.6)
 		yield_labels[i].text = "\n".join(lines)
 		yield_labels[i].modulate = col
+		var h := 1.05
+		if preview_by_cell.has(i):
+			h = 1.6 if i == hover_cell else 0.45
+		yield_labels[i].position = cell_pos(i) + Vector3(0, h, 0)
+	_update_combo_links(prod)
+
+
+## Постоянные золотые дорожки между зданиями, у которых сработало комбо.
+func _update_combo_links(prod: Dictionary) -> void:
+	for c in combo_links.get_children():
+		c.queue_free()
+	var done := {}
+	for i in Board.CELL_COUNT:
+		for c in prod["cells"][i]["combos"]:
+			for p in c["partners"]:
+				var key := "%d-%d" % [mini(i, p), maxi(i, p)]
+				if done.has(key):
+					continue
+				done[key] = true
+				combo_links.add_child(_link_mesh(i, p, 0.1, 0.03, _glow_mat(COMBO_LINK_COLOR, 0.9)))
+
+
+func _link_mesh(a: int, b: int, width: float, y: float, mat: Material) -> MeshInstance3D:
+	var pa := cell_pos(a)
+	var pb := cell_pos(b)
+	var mi := MeshInstance3D.new()
+	var m := BoxMesh.new()
+	var horizontal := absf(pa.x - pb.x) > 0.01
+	var length := pa.distance_to(pb)
+	m.size = Vector3(length if horizontal else width, 0.04, width if horizontal else length)
+	mi.mesh = m
+	mi.position = (pa + pb) / 2 + Vector3(0, y, 0)
+	mi.material_override = mat
+	return mi
+
+
+func _glow_mat(color: Color, alpha: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(color, alpha)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return m
+
+
+# ---------------------------------------------------------------- Эффекты
+
+## После постановки: вылетающие числа, вспышка связей, открытие новых комбо.
+func _play_combo_effects(before: Dictionary, placed_cell: int) -> void:
+	var after: Dictionary = run.production()
+	var before_keys := _combo_keys(before)
+	var delay := 0.0
+	for i in Board.CELL_COUNT:
+		var d := {}
+		for res in data.resources:
+			var v := int(after["cells"][i]["yield"].get(res, 0)) - int(before["cells"][i]["yield"].get(res, 0))
+			if v != 0:
+				d[res] = v
+		if d.is_empty():
+			continue
+		var is_combo := false
+		for c in after["cells"][i]["combos"]:
+			if not before_keys.has(_combo_key(i, c)):
+				is_combo = true
+				for p in c["partners"]:
+					_flash_link(i, p)
+					_flash_tile(p)
+		if is_combo:
+			_flash_tile(i)
+		_float_number(i, d, delay, is_combo)
+		delay += 0.12
+	var ids := []
+	for i in Board.CELL_COUNT:
+		for c in after["cells"][i]["combos"]:
+			ids.append(c["id"])
+	var fresh: Array = book.discover(ids)
+	if not fresh.is_empty():
+		book.save_book()
+		var names := []
+		for rule in data.combos:
+			if data.combo_id(rule) in fresh:
+				names.append(rule.get("text", ""))
+		_show_toast("Новое комбо в книге!\n" + "\n".join(names))
+
+
+func _float_number(cell: int, amounts: Dictionary, delay: float, big: bool) -> void:
+	var lbl := Label3D.new()
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.no_depth_test = true
+	lbl.render_priority = 10
+	lbl.font_size = 64 if big else 44
+	lbl.outline_size = 18
+	lbl.outline_modulate = Color(0, 0, 0, 0.9)
+	lbl.pixel_size = 0.006
+	var lines := []
+	var col := Color.WHITE
+	for res in amounts:
+		if lines.is_empty():
+			col = Color(data.resources[res]["color"])
+		lines.append("%s%d %s" % ["+" if amounts[res] > 0 else "", amounts[res], data.resources[res]["short"]])
+	lbl.text = "\n".join(lines)
+	lbl.modulate = Color(col, 0.0)
+	var start := cell_pos(cell) + Vector3(0, 0.9, 0)
+	lbl.position = start
+	add_child(lbl)
+	var t := create_tween()
+	t.tween_interval(delay)
+	t.tween_property(lbl, "modulate:a", 1.0, 0.08)
+	t.parallel().tween_property(lbl, "scale", Vector3.ONE * (1.35 if big else 1.1), 0.12).from(Vector3.ONE * 0.5)
+	t.tween_property(lbl, "scale", Vector3.ONE, 0.15)
+	t.parallel().tween_property(lbl, "position", start + Vector3(0, 1.2, 0), 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	t.parallel().tween_property(lbl, "modulate:a", 0.0, 0.5).set_delay(0.8)
+	t.tween_callback(lbl.queue_free)
+
+
+func _flash_link(a: int, b: int) -> void:
+	var mat := _glow_mat(Color.WHITE, 1.0)
+	var mi := _link_mesh(a, b, 0.22, 0.25, mat)
+	add_child(mi)
+	var t := create_tween()
+	t.tween_property(mat, "albedo_color", Color(COMBO_LINK_COLOR, 0.0), 0.9).set_ease(Tween.EASE_IN)
+	t.tween_callback(mi.queue_free)
+
+
+func _flash_tile(cell: int) -> void:
+	var mi := MeshInstance3D.new()
+	var m := BoxMesh.new()
+	m.size = Vector3(1.1, 0.02, 1.1)
+	mi.mesh = m
+	mi.position = cell_pos(cell) + Vector3(0, 0.02, 0)
+	var mat := _glow_mat(COMBO_LINK_COLOR, 0.8)
+	mi.material_override = mat
+	add_child(mi)
+	var t := create_tween()
+	t.tween_property(mat, "albedo_color:a", 0.0, 0.7)
+	t.tween_callback(mi.queue_free)
+
+
+func _show_toast(text: String) -> void:
+	toast.text = text
+	toast.visible = true
+	toast.modulate.a = 1.0
+	var t := create_tween()
+	t.tween_interval(2.2)
+	t.tween_property(toast, "modulate:a", 0.0, 0.6)
+	t.tween_callback(func(): toast.visible = false)
 
 
 # ---------------------------------------------------------------- Интерфейс
@@ -368,6 +597,18 @@ func _build_ui() -> void:
 	v.add_child(overlay_buttons)
 	overlay.visible = false
 
+	toast = Label.new()
+	toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 24)
+	toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	toast.add_theme_font_size_override("font_size", 20)
+	toast.add_theme_color_override("font_color", Color("#ffd866"))
+	toast.add_theme_constant_override("outline_size", 8)
+	toast.add_theme_color_override("font_outline_color", Color.BLACK)
+	toast.visible = false
+	root.add_child(toast)
+
 
 func _panel(parent: Control, width: float) -> PanelContainer:
 	var p := PanelContainer.new()
@@ -423,6 +664,7 @@ func _refresh() -> void:
 	if selected >= run.hand.size():
 		selected = -1
 	_sync_buildings()
+	_update_preview()
 	_update_tiles()
 	_update_ghost()
 	_update_yield_labels()
@@ -458,9 +700,16 @@ func _refresh_info() -> void:
 	s += "\n[color=#8a96a3]В колоде: %d в доборе, %d в сбросе[/color]" % [run.deck.draw_pile.size(), run.deck.discard_pile.size()]
 	info_text.text = s
 
-	var r := "[b]Комбо[/b] (соседи — только по сторонам)\n"
+	var known := 0
+	var book_lines := ""
 	for rule in data.combos:
-		r += "• %s\n" % rule.get("text", "")
+		if book.is_known(data.combo_id(rule)):
+			known += 1
+			book_lines += "[color=#ffd866]★[/color] %s\n" % rule.get("text", "")
+		else:
+			book_lines += "[color=#6b7683]☆ %s + ???[/color]\n" % data.building_name(rule["building"])
+	var r := "[b]Книга комбо[/b] %d/%d\n[color=#8a96a3]соседи — только по сторонам[/color]\n" % [known, data.combos.size()]
+	r += book_lines
 	r += "\n[b]Базовый доход[/b]\n"
 	for id in data.buildings:
 		var b: Dictionary = data.buildings[id]
@@ -481,17 +730,8 @@ func _refresh_hand() -> void:
 func _card_button(i: int, id: String) -> Button:
 	var b: Dictionary = data.buildings[id]
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(150, 150)
-	btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	btn.custom_minimum_size = Vector2(170, 170)
 	btn.focus_mode = Control.FOCUS_NONE
-	btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-	var lines := ["[%d] %s" % [i + 1, b["name"]], data.format_amounts(b.get("yield", {}))]
-	for rule in data.combos_for(id):
-		var t: String = rule.get("text", "")
-		lines.append(t.replace(b["name"], "").strip_edges().trim_prefix(":").strip_edges())
-	btn.text = "\n".join(lines)
-	btn.add_theme_font_size_override("font_size", 13)
 	var res_col := Color(_res_color(b.get("resource", "")))
 	for state in ["normal", "hover", "pressed", "focus"]:
 		var sb := StyleBoxFlat.new()
@@ -503,12 +743,62 @@ func _card_button(i: int, id: String) -> Button:
 		sb.set_border_width_all(4 if sel else 2)
 		sb.border_width_top = 10
 		sb.set_corner_radius_all(8)
-		sb.set_content_margin_all(8)
 		if sel:
 			sb.expand_margin_top = 12
 		btn.add_theme_stylebox_override(state, sb)
 	btn.pressed.connect(_select.bind(i))
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 8)
+	margin.add_theme_constant_override("margin_top", 14)
+	btn.add_child(margin)
+	var v := VBoxContainer.new()
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_theme_constant_override("separation", 3)
+	margin.add_child(v)
+
+	var title := _card_label("[%d] %s" % [i + 1, b["name"]], 15, Color.WHITE)
+	v.add_child(title)
+	v.add_child(_card_label(data.format_amounts(b.get("yield", {})) if not b.get("yield", {}).is_empty() else "сама ничего", 12, res_col))
+	var partners: Array = data.partners_of(id)
+	if not partners.is_empty():
+		v.add_child(_card_label("Комбо с:", 11, Color("#8a96a3")))
+	for p in partners:
+		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_theme_constant_override("separation", 5)
+		var chip := ColorRect.new()
+		chip.color = Color(data.buildings[p["id"]].get("color", "#ffffff"))
+		chip.custom_minimum_size = Vector2(12, 12)
+		chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(chip)
+		var rule: Dictionary = p["rule"]
+		var gain: String = data.format_amounts(rule["bonus"])
+		var txt: String
+		if p["as_partner"]:
+			txt = "%s получит %s" % [data.building_name(p["id"]), gain]
+		else:
+			var cnt := int(rule.get("min", 1))
+			txt = "%s%s: %s%s" % [data.building_name(p["id"]), " ×%d" % cnt if cnt > 1 else "", gain, " за каждого" if rule.get("per", false) else ""]
+		var l := _card_label(txt, 11, Color("#ffd866") if not p["as_partner"] else Color("#c9d1d9"))
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		v.add_child(row)
 	return btn
+
+
+func _card_label(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	return l
 
 
 func _refresh_hint() -> void:
@@ -554,13 +844,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			hover_cell = c
 			_update_tiles()
 			_update_ghost()
+			_update_yield_labels()
 			_refresh_hint()
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			var c := _cell_at(event.position)
+			var before: Dictionary = run.production()
 			if selected >= 0 and run.place(selected, c):
 				selected = -1
 				_refresh()
+				_play_combo_effects(before, c)
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			selected = -1
 			_refresh()
@@ -616,6 +909,12 @@ func _on_finish() -> void:
 		s += "[color=#6fcf97]Задание выполнено![/color] Награда: %s\n" % _fmt(g["reward"], true)
 	else:
 		s += "[color=#8a96a3]Задание не выполнено (%s ≥ %d)[/color]\n" % [data.resources[g["resource"]]["short"], g["target"]]
+	if g.has("best"):
+		var got := int(rep["income"].get(g["resource"], 0))
+		if got >= int(g["best"]):
+			s += "[color=#ffd866]Идеальная раскладка! %d %s — максимум для этой руки[/color]\n" % [got, data.resources[g["resource"]]["short"]]
+		else:
+			s += "[color=#8a96a3]Максимум с этой рукой: %d %s[/color]\n" % [g["best"], data.resources[g["resource"]]["short"]]
 	if rep.has("threat"):
 		var t: Dictionary = rep["threat"]
 		if rep["threat_passed"]:

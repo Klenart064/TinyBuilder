@@ -47,12 +47,13 @@ static func neighbors(i: int, diagonal: bool = false) -> Array:
 
 
 ## Считает доход всего поля.
-## Возвращает {"total": {res: n}, "cells": [{"yield": {res: n}, "notes": [текст комбо]}]}
+## Возвращает {"total": {res: n}, "cells": [{"yield", "notes", "combos"}]}
+## combos — сработавшие комбо клетки: [{"id", "partners": [клетки-соседи], "bonus": {res: n}}]
 func evaluate(data) -> Dictionary:
 	var total: Dictionary = data.zero_resources()
 	var per_cell := []
 	for i in CELL_COUNT:
-		var info := {"yield": {}, "notes": []}
+		var info := {"yield": {}, "notes": [], "combos": []}
 		var id: String = cells[i]
 		if id != "":
 			var b: Dictionary = data.buildings[id]
@@ -62,9 +63,12 @@ func evaluate(data) -> Dictionary:
 					continue
 				var times := combo_times(i, rule, data)
 				if times > 0:
-					_add(info["yield"], rule.get("bonus", {}), times)
+					var bonus := {}
+					_add(bonus, rule.get("bonus", {}), times)
+					_add(info["yield"], bonus, 1)
 					var text: String = rule.get("text", "")
 					info["notes"].append(text if times == 1 else "%s ×%d" % [text, times])
+					info["combos"].append({"id": data.combo_id(rule), "partners": combo_partners(i, rule, data), "bonus": bonus})
 		_add(total, info["yield"], 1)
 		per_cell.append(info)
 	return {"total": total, "cells": per_cell}
@@ -83,6 +87,102 @@ func combo_times(i: int, rule: Dictionary, data) -> int:
 	if rule.get("per", false):
 		return count
 	return 1
+
+
+## Максимум каждого ресурса, который можно получить на поле, разыграв карты hand
+## (каждый ресурс максимизируется отдельно). Перебирает все расстановки.
+## Доход от построек только растёт, поэтому ставим столько карт, сколько влезает.
+func best_totals(data, hand: Array) -> Dictionary:
+	var cards := hand.duplicate()
+	cards.sort()  # одинаковые карты рядом — так проще отсечь повторы
+	var ctx := {
+		"res": data.resources.keys(),
+		"rules": _rules_by_building(data),
+		"yields": {},
+		"nbr": [],
+		"best": data.zero_resources(),
+	}
+	for id in data.buildings:
+		ctx["yields"][id] = data.buildings[id].get("yield", {})
+	for i in CELL_COUNT:
+		ctx["nbr"].append([neighbors(i, false), neighbors(i, true)])
+	_search(ctx, cards, 0, free_cells().size(), -1)
+	return ctx["best"]
+
+
+func _rules_by_building(data) -> Dictionary:
+	var out := {}
+	for rule in data.combos:
+		var b: String = rule.get("building", "")
+		if not out.has(b):
+			out[b] = []
+		out[b].append({
+			"wanted": data.neighbor_list(rule),
+			"min": int(rule.get("min", 1)),
+			"per": rule.get("per", false),
+			"diag": 1 if rule.get("diagonal", false) else 0,
+			"bonus": rule.get("bonus", {}),
+		})
+	return out
+
+
+func _search(ctx: Dictionary, cards: Array, idx: int, free_left: int, prev_cell: int) -> void:
+	if idx == cards.size() or free_left == 0:
+		_fast_score(ctx)
+		return
+	if cards.size() - idx > free_left:
+		_search(ctx, cards, idx + 1, free_left, -1)  # эту карту не играем
+	var same_as_prev: bool = idx > 0 and cards[idx] == cards[idx - 1]
+	for cell in CELL_COUNT:
+		if cells[cell] != "":
+			continue
+		if same_as_prev and cell < prev_cell:
+			continue
+		cells[cell] = cards[idx]
+		_search(ctx, cards, idx + 1, free_left - 1, cell)
+		cells[cell] = ""
+
+
+## Упрощённый evaluate для перебора: без описаний, сразу обновляет максимумы.
+func _fast_score(ctx: Dictionary) -> void:
+	var total := {}
+	for res in ctx["res"]:
+		total[res] = 0
+	var rules: Dictionary = ctx["rules"]
+	var yields: Dictionary = ctx["yields"]
+	for i in CELL_COUNT:
+		var id: String = cells[i]
+		if id == "":
+			continue
+		var y: Dictionary = yields[id]
+		for res in y:
+			total[res] += int(y[res])
+		if not rules.has(id):
+			continue
+		for r in rules[id]:
+			var count := 0
+			for n in ctx["nbr"][i][r["diag"]]:
+				if cells[n] in r["wanted"]:
+					count += 1
+			if count < r["min"]:
+				continue
+			var times: int = count if r["per"] else 1
+			for res in r["bonus"]:
+				total[res] += int(r["bonus"][res]) * times
+	var best: Dictionary = ctx["best"]
+	for res in total:
+		if total[res] > best[res]:
+			best[res] = total[res]
+
+
+## Клетки-соседи, которые участвуют в правиле для клетки i.
+func combo_partners(i: int, rule: Dictionary, data) -> Array:
+	var wanted: Array = data.neighbor_list(rule)
+	var out := []
+	for n in neighbors(i, rule.get("diagonal", false)):
+		if cells[n] in wanted:
+			out.append(n)
+	return out
 
 
 ## Насколько изменится общий доход поля, если поставить здание id в клетку i.

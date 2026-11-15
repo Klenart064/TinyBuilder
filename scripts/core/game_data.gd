@@ -62,6 +62,25 @@ static func neighbor_list(rule: Dictionary) -> Array:
 	return n
 
 
+## Уникальный id правила комбо (поле "id" в JSON или building+neighbor).
+static func combo_id(rule: Dictionary) -> String:
+	if rule.has("id"):
+		return rule["id"]
+	return "%s+%s" % [rule.get("building", ""), "/".join(neighbor_list(rule))]
+
+
+## Здания, с которыми у здания id есть комбо (в обе стороны): [{"id", "rule", "as_partner"}]
+func partners_of(id: String) -> Array:
+	var out := []
+	for rule in combos:
+		if rule.get("building", "") == id:
+			for n in neighbor_list(rule):
+				out.append({"id": n, "rule": rule, "as_partner": false})
+		elif id in neighbor_list(rule):
+			out.append({"id": rule["building"], "rule": rule, "as_partner": true})
+	return out
+
+
 func zero_resources() -> Dictionary:
 	var d := {}
 	for res in resources:

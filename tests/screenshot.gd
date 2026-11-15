@@ -17,20 +17,44 @@ func _initialize() -> void:
 
 func _run() -> void:
 	await _frames(5)
+	main.book.reset()
 	main.run.start(main.data, 3)
-	# Разыгрываем пару карт, выбираем третью и наводимся на клетку
-	for k in 2:
-		var free: Array = main.run.board.free_cells()
-		main.run.place(0, free[k])
-	main.selected = 0 if main.run.hand.size() > 0 else -1
-	main.hover_cell = main.run.board.free_cells()[0]
+	# Заготовленная раскладка, чтобы скриншоты были одинаковыми
+	var b = main.run.board
+	for i in 9:
+		b.cells[i] = ""
+		b.prebuilt[i] = false
+	b.cells[3] = "field"
+	b.cells[7] = "field"
+	b.cells[2] = "rock"
+	b.prebuilt[3] = true
+	b.prebuilt[7] = true
+	b.prebuilt[2] = true
+	main.run.hand = ["house", "mill", "market", "barracks"]
 	main._refresh()
-	await _frames(10)
+	await _frames(5)
+	# Ставим домик в центр, как будто кликнули
+	var before: Dictionary = main.run.production()
+	main.run.place(0, 4)
+	main._refresh()
+	main._play_combo_effects(before, 4)
+	await _seconds(0.35)
+	_save("shot_combo.png")
+	await _seconds(1.5)
+	# Выбираем мельницу и наводимся на клетку между полями
+	main.selected = 0
+	main.hover_cell = 6
+	main._refresh()
+	await _frames(5)
 	_save("shot_board.png")
 	main._on_finish()
 	await _frames(10)
 	_save("shot_summary.png")
 	quit()
+
+
+func _seconds(t: float) -> void:
+	await create_timer(t).timeout
 
 
 func _frames(n: int) -> void:

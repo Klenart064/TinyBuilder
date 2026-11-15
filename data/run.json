@@ -4,11 +4,19 @@
   "rock_cells": [0, 2],
   "prebuilt_cells": [0, 2],
   "prebuilt_pool": ["field", "field", "house", "mill", "wall", "mine", "tower", "market"],
+  "_goals_help": "Задание поля: набрать ресурс на этом поле. Цель считается от максимума, которого можно добиться текущей рукой: доля goal_difficulty растёт от первого значения ко второму за difficulty_ramp_fields полей (± goal_difficulty_spread). min_target — задание не даётся, если рукой нельзя набрать хотя бы столько.",
   "goals": [
-    { "resource": "food",  "target": [4, 9], "reward": { "gold": 5 } },
-    { "resource": "force", "target": [3, 7], "reward": { "gold": 5 } },
-    { "resource": "gold",  "target": [3, 6], "reward": { "force": 4 } }
+    { "resource": "food",  "min_target": 4, "reward": { "gold": 5 } },
+    { "resource": "force", "min_target": 3, "reward": { "gold": 5 } },
+    { "resource": "gold",  "min_target": 3, "reward": { "force": 4 } }
   ],
+  "generation": {
+    "max_attempts": 10,
+    "rock_forbidden_cells": [4],
+    "goal_difficulty": [0.6, 0.95],
+    "goal_difficulty_spread": 0.1,
+    "difficulty_ramp_fields": 16
+  },
   "reward_choices": 3,
   "reward_pool": ["house", "field", "mill", "barracks", "tower", "wall", "mine", "smithy", "market"],
   "threats": [
