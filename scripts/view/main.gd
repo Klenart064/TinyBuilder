@@ -39,7 +39,7 @@ var preview_by_cell: Dictionary = {}
 var hover_partners: Array = []
 
 # UI
-var info_text: RichTextLabel
+var info_box: VBoxContainer
 var rules_text: RichTextLabel
 var hint_text: RichTextLabel
 var hand_box: HBoxContainer
@@ -48,7 +48,7 @@ var finish_btn: Button
 var overlay: Control
 var overlay_text: RichTextLabel
 var overlay_buttons: HBoxContainer
-var toast: Label
+var toast: RichTextLabel
 
 
 func _ready() -> void:
@@ -116,17 +116,10 @@ func _build_world() -> void:
 		tiles.append(tile)
 		tile_materials.append(mat)
 
-		var lbl := Label3D.new()
-		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		lbl.no_depth_test = true
-		lbl.render_priority = 5
-		lbl.font_size = 34
-		lbl.outline_size = 14
-		lbl.outline_modulate = Color(0, 0, 0, 0.85)
-		lbl.pixel_size = 0.006
-		lbl.position = cell_pos(i) + Vector3(0, 1.05, 0)
-		add_child(lbl)
-		yield_labels.append(lbl)
+		var holder := Node3D.new()
+		holder.position = cell_pos(i) + Vector3(0, 1.05, 0)
+		add_child(holder)
+		yield_labels.append(holder)
 
 		building_nodes.append(null)
 		building_ids.append("")
@@ -322,30 +315,80 @@ func _combo_keys(prod: Dictionary) -> Dictionary:
 func _update_yield_labels() -> void:
 	var prod: Dictionary = run.production()
 	for i in Board.CELL_COUNT:
-		var y: Dictionary = prod["cells"][i]["yield"]
-		var lines := []
-		var col := Color.WHITE
-		for res in data.resources:
-			var v := int(y.get(res, 0))
-			if v != 0:
-				if lines.is_empty():
-					col = Color(data.resources[res]["color"])
-				lines.append("+%d %s" % [v, data.resources[res]["short"]])
-		if preview_by_cell.has(i):
-			var d: Dictionary = preview_by_cell[i]["delta"]
-			lines = []
-			for res in data.resources:
-				var v := int(d.get(res, 0))
-				if v != 0:
-					lines.append("%s%d %s" % ["+" if v > 0 else "", v, data.resources[res]["short"]])
-			col = Color(1, 0.9, 0.4, 0.95) if preview_by_cell[i]["combo"] else Color(1, 1, 1, 0.6)
-		yield_labels[i].text = "\n".join(lines)
-		yield_labels[i].modulate = col
+		var holder: Node3D = yield_labels[i]
+		for c in holder.get_children():
+			c.queue_free()
+		var amounts: Dictionary = prod["cells"][i]["yield"]
+		var tint := Color.WHITE
 		var h := 1.05
 		if preview_by_cell.has(i):
+			amounts = preview_by_cell[i]["delta"]
+			tint = Color(1, 0.9, 0.45) if preview_by_cell[i]["combo"] else Color(1, 1, 1, 0.65)
 			h = 1.6 if i == hover_cell else 0.45
-		yield_labels[i].position = cell_pos(i) + Vector3(0, h, 0)
+		holder.position = cell_pos(i) + Vector3(0, h, 0)
+		holder.add_child(_make_badge(amounts, 34, tint, 5))
 	_update_combo_links(prod)
+
+
+## Значок «+3 [иконка]» над клеткой: строка на ресурс, всегда смотрит в камеру.
+func _make_badge(amounts: Dictionary, font_size: int, tint: Color, priority: int) -> Node3D:
+	var root := Node3D.new()
+	var lines := []
+	for res in data.resources:
+		var v := int(amounts.get(res, 0))
+		if v != 0:
+			lines.append([res, v])
+	var line_h := font_size * 1.15
+	var top := (lines.size() - 1) * line_h / 2.0
+	for k in lines.size():
+		var res: String = lines[k][0]
+		var v: int = lines[k][1]
+		var y := top - k * line_h
+		var lbl := Label3D.new()
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.no_depth_test = true
+		lbl.render_priority = priority
+		lbl.outline_render_priority = priority - 1
+		lbl.font_size = font_size
+		lbl.outline_size = int(font_size * 0.4)
+		lbl.outline_modulate = Color(0, 0, 0, 0.85 * tint.a)
+		lbl.pixel_size = 0.006
+		lbl.text = "%s%d" % ["+" if v > 0 else "", v]
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		lbl.offset = Vector2(-font_size * 0.05, y)
+		lbl.modulate = Color(Color(data.resources[res]["color"]).lerp(Color.WHITE, 0.35) * tint, tint.a)
+		root.add_child(lbl)
+		var spr := Sprite3D.new()
+		spr.texture = _icon(res)
+		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		spr.no_depth_test = true
+		spr.render_priority = priority
+		spr.pixel_size = 0.006 * font_size * 1.1 / 64.0
+		spr.centered = true
+		# offset у Sprite3D — в пикселях текстуры
+		var k_px := 64.0 / (font_size * 1.1)
+		spr.offset = Vector2(font_size * 0.6 * k_px, y * k_px)
+		spr.modulate = Color(1, 1, 1, tint.a)
+		root.add_child(spr)
+	return root
+
+
+func _set_badge_alpha(root: Node3D, a: float) -> void:
+	for c in root.get_children():
+		if c is Label3D:
+			c.modulate.a = a
+			c.outline_modulate.a = 0.85 * a
+		elif c is Sprite3D:
+			c.modulate.a = a
+
+
+var _icon_cache: Dictionary = {}
+
+func _icon(res: String) -> Texture2D:
+	if not _icon_cache.has(res):
+		var path: String = data.resources.get(res, {}).get("icon", "")
+		_icon_cache[res] = load(path) if path != "" else null
+	return _icon_cache[res]
 
 
 ## Постоянные золотые дорожки между зданиями, у которых сработало комбо.
@@ -421,38 +464,24 @@ func _play_combo_effects(before: Dictionary, placed_cell: int) -> void:
 		var names := []
 		for rule in data.combos:
 			if data.combo_id(rule) in fresh:
-				names.append(rule.get("text", ""))
-		_show_toast("Новое комбо в книге!\n" + "\n".join(names))
+				names.append(_combo_bb(rule))
+		_show_toast("[center][b]Новое комбо в книге![/b]\n" + "\n".join(names) + "[/center]")
 
 
 func _float_number(cell: int, amounts: Dictionary, delay: float, big: bool) -> void:
-	var lbl := Label3D.new()
-	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	lbl.no_depth_test = true
-	lbl.render_priority = 10
-	lbl.font_size = 64 if big else 44
-	lbl.outline_size = 18
-	lbl.outline_modulate = Color(0, 0, 0, 0.9)
-	lbl.pixel_size = 0.006
-	var lines := []
-	var col := Color.WHITE
-	for res in amounts:
-		if lines.is_empty():
-			col = Color(data.resources[res]["color"])
-		lines.append("%s%d %s" % ["+" if amounts[res] > 0 else "", amounts[res], data.resources[res]["short"]])
-	lbl.text = "\n".join(lines)
-	lbl.modulate = Color(col, 0.0)
+	var badge := _make_badge(amounts, 60 if big else 44, Color.WHITE, 10)
 	var start := cell_pos(cell) + Vector3(0, 0.9, 0)
-	lbl.position = start
-	add_child(lbl)
+	badge.position = start
+	_set_badge_alpha(badge, 0.0)
+	add_child(badge)
 	var t := create_tween()
 	t.tween_interval(delay)
-	t.tween_property(lbl, "modulate:a", 1.0, 0.08)
-	t.parallel().tween_property(lbl, "scale", Vector3.ONE * (1.35 if big else 1.1), 0.12).from(Vector3.ONE * 0.5)
-	t.tween_property(lbl, "scale", Vector3.ONE, 0.15)
-	t.parallel().tween_property(lbl, "position", start + Vector3(0, 1.2, 0), 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.parallel().tween_property(lbl, "modulate:a", 0.0, 0.5).set_delay(0.8)
-	t.tween_callback(lbl.queue_free)
+	t.tween_method(func(a): _set_badge_alpha(badge, a), 0.0, 1.0, 0.08)
+	t.parallel().tween_property(badge, "scale", Vector3.ONE * (1.35 if big else 1.1), 0.12).from(Vector3.ONE * 0.5)
+	t.tween_property(badge, "scale", Vector3.ONE, 0.15)
+	t.parallel().tween_property(badge, "position", start + Vector3(0, 1.2, 0), 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	t.parallel().tween_method(func(a): _set_badge_alpha(badge, a), 1.0, 0.0, 0.5).set_delay(0.8)
+	t.tween_callback(badge.queue_free)
 
 
 func _flash_link(a: int, b: int) -> void:
@@ -501,7 +530,9 @@ func _build_ui() -> void:
 	# Левая панель: поле, задание, угроза, запасы
 	var left := _panel(root, 380)
 	left.position = Vector2(12, 12)
-	info_text = _rich(left)
+	info_box = VBoxContainer.new()
+	info_box.add_theme_constant_override("separation", 8)
+	left.add_child(info_box)
 
 	# Правая панель: правила комбо
 	var right := _panel(root, 320)
@@ -597,17 +628,127 @@ func _build_ui() -> void:
 	v.add_child(overlay_buttons)
 	overlay.visible = false
 
-	toast = Label.new()
-	toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 24)
+	toast = RichTextLabel.new()
+	toast.bbcode_enabled = true
+	toast.fit_content = true
+	toast.scroll_active = false
+	toast.custom_minimum_size = Vector2(520, 0)
+	toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 20)
 	toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	toast.add_theme_font_size_override("font_size", 20)
-	toast.add_theme_color_override("font_color", Color("#ffd866"))
+	toast.add_theme_font_size_override("normal_font_size", 20)
+	toast.add_theme_font_size_override("bold_font_size", 20)
+	toast.add_theme_color_override("default_color", Color("#ffd866"))
 	toast.add_theme_constant_override("outline_size", 8)
 	toast.add_theme_color_override("font_outline_color", Color.BLACK)
 	toast.visible = false
 	root.add_child(toast)
+
+
+func _label(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	return l
+
+
+func _rich_line(bb: String) -> RichTextLabel:
+	var r := RichTextLabel.new()
+	r.bbcode_enabled = true
+	r.fit_content = true
+	r.scroll_active = false
+	r.autowrap_mode = TextServer.AUTOWRAP_OFF
+	r.add_theme_font_size_override("normal_font_size", 14)
+	r.text = bb
+	return r
+
+
+func _box(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.border_width_bottom = 3
+	sb.set_corner_radius_all(radius)
+	sb.set_content_margin_all(6)
+	return sb
+
+
+func _icon_rect(res: String, size: int) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.texture = _icon(res)
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.custom_minimum_size = Vector2(size, size)
+	tr.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return tr
+
+
+## Блок с заголовком. Возвращает VBox для содержимого (его родитель — сам блок).
+func _section(title: String, color: Color) -> VBoxContainer:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("#1a212b")
+	sb.border_color = color
+	sb.border_width_left = 3
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(8)
+	p.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	var l := _label(title, 14, color)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(l)
+	p.add_child(v)
+	return v
+
+
+## [иконка] [полоска прогресса с «have / need»]
+func _progress_row(res: String, have: int, need: int, done: bool) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.add_child(_icon_rect(res, 24))
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.max_value = maxi(need, 1)
+	bar.value = mini(have, need)
+	bar.custom_minimum_size = Vector2(0, 22)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color("#0e1319")
+	bg.set_corner_radius_all(4)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(_res_color(res)).darkened(0.15)
+	fill.set_corner_radius_all(4)
+	bar.add_theme_stylebox_override("background", bg)
+	bar.add_theme_stylebox_override("fill", fill)
+	var txt := _label("%d / %d%s" % [have, need, "  ✔" if done else ""], 13, Color.WHITE)
+	txt.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	txt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	txt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	txt.add_theme_constant_override("outline_size", 5)
+	txt.add_theme_color_override("font_outline_color", Color.BLACK)
+	bar.add_child(txt)
+	row.add_child(bar)
+	return row
+
+
+## Строка «+3 [иконка] +2 [иконка]» для карточек.
+func _amount_row(amounts: Dictionary, size: int) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 2)
+	for res in data.resources:
+		var v := int(amounts.get(res, 0))
+		if v == 0:
+			continue
+		var l := _label("%s%d" % ["+" if v > 0 else "", v], size, Color(_res_color(res)).lerp(Color.WHITE, 0.3))
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(l)
+		row.add_child(_icon_rect(res, size + 4))
+	return row
 
 
 func _panel(parent: Control, width: float) -> PanelContainer:
@@ -648,6 +789,26 @@ func _res_color(res: String) -> String:
 
 
 ## Ресурсы цветным текстом: «[color]12 еды[/color], ...»
+## Иконка ресурса внутри RichTextLabel.
+func _img(res: String, size: int = 18) -> String:
+	return "[img=%dx%d]%s[/img]" % [size, size, data.resources.get(res, {}).get("icon", "")]
+
+
+## Комбо значками: «Домик + Поле → +3 [иконка]».
+func _combo_bb(rule: Dictionary) -> String:
+	var names := []
+	for n in data.neighbor_list(rule):
+		names.append(data.building_name(n))
+	var partner := "/".join(names)
+	var cnt := int(rule.get("min", 1))
+	if cnt > 1 and not rule.get("per", false):
+		partner = "%d× %s" % [cnt, partner]
+	var s := "%s + %s → %s" % [data.building_name(rule["building"]), partner, _fmt(rule.get("bonus", {}), true)]
+	if rule.get("per", false):
+		s += " за каждого"
+	return s
+
+
 func _fmt(amounts: Dictionary, plus: bool = false, show_zero: bool = false) -> String:
 	var parts := []
 	for res in data.resources:
@@ -656,7 +817,7 @@ func _fmt(amounts: Dictionary, plus: bool = false, show_zero: bool = false) -> S
 		var v := int(amounts.get(res, 0))
 		if v == 0 and not show_zero:
 			continue
-		parts.append("[color=%s]%s%d %s[/color]" % [_res_color(res), "+" if plus and v > 0 else "", v, data.resources[res]["short"]])
+		parts.append("[color=%s]%s%d[/color]%s" % [_res_color(res), "+" if plus and v > 0 else "", v, _img(res)])
 	return ", ".join(parts) if not parts.is_empty() else "ничего"
 
 
@@ -675,37 +836,70 @@ func _refresh() -> void:
 
 
 func _refresh_info() -> void:
+	for c in info_box.get_children():
+		info_box.remove_child(c)
+		c.queue_free()
 	var total: Dictionary = run.production()["total"]
+
+	# Заголовок
+	var head := HBoxContainer.new()
+	head.add_child(_label("Поле %d" % run.field_number, 22, Color.WHITE))
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(sp)
+	head.add_child(_label("колода %d · сброс %d" % [run.deck.draw_pile.size(), run.deck.discard_pile.size()], 12, Color("#8a96a3")))
+	info_box.add_child(head)
+
+	# Запасы: большая иконка, число, сколько даст это поле
+	var res_row := HBoxContainer.new()
+	res_row.add_theme_constant_override("separation", 8)
+	for res in data.resources:
+		var chip := PanelContainer.new()
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.add_theme_stylebox_override("panel", _box(Color("#1f2733"), Color(_res_color(res)), 6))
+		var v := VBoxContainer.new()
+		v.alignment = BoxContainer.ALIGNMENT_CENTER
+		v.add_theme_constant_override("separation", 0)
+		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 6)
+		row.add_child(_icon_rect(res, 30))
+		row.add_child(_label(str(int(run.stock.get(res, 0))), 24, Color.WHITE))
+		v.add_child(row)
+		var inc := int(total.get(res, 0))
+		var inc_lbl := _label("+%d с поля" % inc if inc > 0 else "—", 12, Color("#6fcf97") if inc > 0 else Color("#5b6672"))
+		inc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(inc_lbl)
+		chip.add_child(v)
+		res_row.add_child(chip)
+	info_box.add_child(res_row)
+
+	# Задание поля
 	var g: Dictionary = run.goal
 	var progress := int(total.get(g["resource"], 0))
-	var done := progress >= int(g["target"])
+	var goal_box := _section("Задание поля", Color("#6fcf97") if progress >= int(g["target"]) else Color("#8a96a3"))
+	goal_box.add_child(_progress_row(g["resource"], progress, int(g["target"]), progress >= int(g["target"])))
+	goal_box.add_child(_rich_line("[color=#8a96a3]Награда:[/color] %s" % _fmt(g["reward"], true)))
+	info_box.add_child(goal_box.get_parent())
+
+	# Угроза
 	var t: Dictionary = run.current_threat()
-	var s := "[b][font_size=20]Поле %d[/font_size][/b]\n" % run.field_number
-	s += "[b]Запасы:[/b] %s\n\n" % _fmt(run.stock, false, true)
-	s += "[b]Доход этого поля:[/b] %s\n" % _fmt(total, true)
-	s += "[b]Задание:[/b] производство [color=%s]%s[/color] на этом поле ≥ %d  (%d/%d) %s\n" % [
-		_res_color(g["resource"]), data.resources[g["resource"]]["short"], g["target"], progress, g["target"],
-		"[color=#6fcf97]✔[/color]" if done else ""]
-	s += "     награда: %s\n\n" % _fmt(g["reward"], true)
 	if not t.is_empty():
+		var n: int = run.fields_until_threat
+		var when := "после этого поля!" if n == 1 else "через %d %s" % [n, _plural(n, "поле", "поля", "полей")]
+		var tb := _section("Угроза %d/%d: %s — %s" % [run.threat_index + 1, data.run["threats"].size(), t["name"], when], Color("#eb5757"))
 		var need: Dictionary = t["need"]
-		var parts := []
 		for res in need:
 			var have := int(run.stock.get(res, 0))
-			var ok := have >= int(need[res])
-			parts.append("[color=%s]%d/%d %s[/color]%s" % [_res_color(res), have, need[res], data.resources[res]["short"], " ✔" if ok else ""])
-		var when := "после этого поля!" if run.fields_until_threat == 1 else "через %d %s" % [run.fields_until_threat, _plural(run.fields_until_threat, "поле", "поля", "полей")]
-		s += "[b][color=#eb5757]Угроза %d/%d: %s[/color][/b] — %s\n" % [run.threat_index + 1, data.run["threats"].size(), t["name"], when]
-		s += "Нужно в запасах: %s\n" % ", ".join(parts)
-	s += "\n[color=#8a96a3]В колоде: %d в доборе, %d в сбросе[/color]" % [run.deck.draw_pile.size(), run.deck.discard_pile.size()]
-	info_text.text = s
+			tb.add_child(_progress_row(res, have, int(need[res]), have >= int(need[res])))
+		info_box.add_child(tb.get_parent())
 
 	var known := 0
 	var book_lines := ""
 	for rule in data.combos:
 		if book.is_known(data.combo_id(rule)):
 			known += 1
-			book_lines += "[color=#ffd866]★[/color] %s\n" % rule.get("text", "")
+			book_lines += "[color=#ffd866]★[/color] %s\n" % _combo_bb(rule)
 		else:
 			book_lines += "[color=#6b7683]☆ %s + ???[/color]\n" % data.building_name(rule["building"])
 	var r := "[b]Книга комбо[/b] %d/%d\n[color=#8a96a3]соседи — только по сторонам[/color]\n" % [known, data.combos.size()]
@@ -762,7 +956,10 @@ func _card_button(i: int, id: String) -> Button:
 
 	var title := _card_label("[%d] %s" % [i + 1, b["name"]], 15, Color.WHITE)
 	v.add_child(title)
-	v.add_child(_card_label(data.format_amounts(b.get("yield", {})) if not b.get("yield", {}).is_empty() else "сама ничего", 12, res_col))
+	if b.get("yield", {}).is_empty():
+		v.add_child(_card_label("сама ничего", 12, Color("#8a96a3")))
+	else:
+		v.add_child(_amount_row(b["yield"], 14))
 	var partners: Array = data.partners_of(id)
 	if not partners.is_empty():
 		v.add_child(_card_label("Комбо с:", 11, Color("#8a96a3")))
@@ -777,16 +974,20 @@ func _card_button(i: int, id: String) -> Button:
 		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(chip)
 		var rule: Dictionary = p["rule"]
-		var gain: String = data.format_amounts(rule["bonus"])
 		var txt: String
 		if p["as_partner"]:
-			txt = "%s получит %s" % [data.building_name(p["id"]), gain]
+			txt = "→ %s:" % data.building_name(p["id"])
 		else:
 			var cnt := int(rule.get("min", 1))
-			txt = "%s%s: %s%s" % [data.building_name(p["id"]), " ×%d" % cnt if cnt > 1 else "", gain, " за каждого" if rule.get("per", false) else ""]
-		var l := _card_label(txt, 11, Color("#ffd866") if not p["as_partner"] else Color("#c9d1d9"))
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			txt = "%s%s:" % ["%d× " % cnt if cnt > 1 and not rule.get("per", false) else "", data.building_name(p["id"])]
+		var l := _card_label(txt, 12, Color("#ffd866") if not p["as_partner"] else Color("#c9d1d9"))
+		l.autowrap_mode = TextServer.AUTOWRAP_OFF
 		row.add_child(l)
+		row.add_child(_amount_row(rule["bonus"], 12))
+		if rule.get("per", false):
+			var each := _card_label("за кажд.", 10, Color("#8a96a3"))
+			each.autowrap_mode = TextServer.AUTOWRAP_OFF
+			row.add_child(each)
 		v.add_child(row)
 	return btn
 
@@ -813,7 +1014,11 @@ func _refresh_hint() -> void:
 		else:
 			s = "Выберите клетку для: %s" % data.building_name(id)
 	elif hover_cell >= 0 and run.board.cells[hover_cell] != "":
-		var notes: Array = run.production()["cells"][hover_cell]["notes"]
+		var notes := []
+		for c in run.production()["cells"][hover_cell]["combos"]:
+			for rule in data.combos:
+				if data.combo_id(rule) == c["id"]:
+					notes.append("%s (%s)" % [_combo_bb(rule), _fmt(c["bonus"], true)])
 		s = data.building_name(run.board.cells[hover_cell])
 		if run.board.prebuilt[hover_cell]:
 			s += " (было на поле)"
@@ -908,13 +1113,13 @@ func _on_finish() -> void:
 	if rep["goal_done"]:
 		s += "[color=#6fcf97]Задание выполнено![/color] Награда: %s\n" % _fmt(g["reward"], true)
 	else:
-		s += "[color=#8a96a3]Задание не выполнено (%s ≥ %d)[/color]\n" % [data.resources[g["resource"]]["short"], g["target"]]
+		s += "[color=#8a96a3]Задание не выполнено (нужно %d%s)[/color]\n" % [g["target"], _img(g["resource"])]
 	if g.has("best"):
 		var got := int(rep["income"].get(g["resource"], 0))
 		if got >= int(g["best"]):
-			s += "[color=#ffd866]Идеальная раскладка! %d %s — максимум для этой руки[/color]\n" % [got, data.resources[g["resource"]]["short"]]
+			s += "[color=#ffd866]Идеальная раскладка! %d%s — максимум для этой руки[/color]\n" % [got, _img(g["resource"])]
 		else:
-			s += "[color=#8a96a3]Максимум с этой рукой: %d %s[/color]\n" % [g["best"], data.resources[g["resource"]]["short"]]
+			s += "[color=#8a96a3]Максимум с этой рукой: %d%s[/color]\n" % [g["best"], _img(g["resource"])]
 	if rep.has("threat"):
 		var t: Dictionary = rep["threat"]
 		if rep["threat_passed"]:

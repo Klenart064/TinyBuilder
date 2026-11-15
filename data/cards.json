@@ -1,9 +1,9 @@
 {
   "_help": "Здания и стартовая колода. yield — базовый доход здания. shape: box, flat, house, tower, mill, rock. color — цвет кубика.",
   "resources": {
-    "food":  { "name": "Еда",    "short": "еды",    "color": "#f2c94c" },
-    "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757" },
-    "gold":  { "name": "Золото", "short": "золота", "color": "#f2994a" }
+    "food":  { "name": "Еда",    "short": "еды",    "color": "#8bc34a", "icon": "res://assets/icons/food.svg" },
+    "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757", "icon": "res://assets/icons/force.svg" },
+    "gold":  { "name": "Золото", "short": "золота", "color": "#f2c94c", "icon": "res://assets/icons/gold.svg" }
   },
   "buildings": {
     "house":    { "name": "Домик",    "resource": "food",  "yield": { "food": 1 },  "shape": "house", "color": "#d9a066", "height": 0.45 },
