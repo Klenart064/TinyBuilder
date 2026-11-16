@@ -53,7 +53,7 @@ static func value(run, f, gain: Dictionary) -> float:
 			rew += int(run.island["task_reward"][r])
 		v += float(rew) * 1.3 if short == 0 else -0.3 * float(short)
 	if run.is_cube():
-		var miss: int = run.CubeField.shortfall(have, g.seals[g.top()]) if not g.broken[g.top()] else 0
+		var miss: int = run.ShapeField.shortfall(have, g.seals[g.top()]) if not g.broken[g.top()] else 0
 		v -= 3.5 * float(miss)
 	elif run.is_boss():
 		var miss := maxi(0, run.boss_need() - run.sum_res(have))
@@ -89,7 +89,7 @@ static func roll_cube(run, smart: bool = true) -> void:
 					var t = g.clone()
 					t.place_building(run.data, c, hand[h])
 					var sc: Dictionary = t.score(run.data)
-					var v := -3.0 * float(run.CubeField.shortfall(sc["total"], t.seals[f])) + 0.2 * float(run.sum_res(sc["total"])) - 2.0 * float(sc["discontent"])
+					var v := -3.0 * float(run.ShapeField.shortfall(sc["total"], t.seals[f])) + 0.2 * float(run.sum_res(sc["total"])) - 2.0 * float(sc["discontent"])
 					if v > pick_v:
 						pick_v = v
 						pick = [h, c]
@@ -97,7 +97,7 @@ static func roll_cube(run, smart: bool = true) -> void:
 				break
 			g.place_building(run.data, pick[1], hand[pick[0]])
 			hand.remove_at(pick[0])
-		var miss: int = run.CubeField.shortfall(g.score(run.data)["total"], g.seals[f])
+		var miss: int = run.ShapeField.shortfall(g.score(run.data)["total"], g.seals[f])
 		var v := 0.0
 		if g.broken[f]:
 			v = -1.5 if left > run.field.sealed_faces().size() else -6.0

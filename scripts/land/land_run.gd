@@ -9,7 +9,7 @@ const Deck = preload("res://scripts/core/deck.gd")
 const LandField = preload("res://scripts/land/land_field.gd")
 const LandGen = preload("res://scripts/land/land_gen.gd")
 const LandEvents = preload("res://scripts/land/land_events.gd")
-const CubeField = preload("res://scripts/land/cube_field.gd")
+const ShapeField = preload("res://scripts/land/shape_field.gd")
 
 var data
 var rng := RandomNumberGenerator.new()
@@ -168,7 +168,7 @@ func _gen_map() -> void:
 					isl["big"] = false
 					isl["turns"] = int(data.run["turns_per_field"])
 					if boss.has("cube"):
-						isl["field"] = CubeField.make(data, rng, boss["cube"])
+						isl["field"] = ShapeField.make(data, rng, boss["cube"])
 						isl["turns"] = int(boss["cube"].get("max_turns", 12))
 				row.append(isl)
 			layers.append(row)
@@ -249,7 +249,7 @@ func choose_island(i: int) -> void:
 	_history.clear()
 	intent = LandEvents.plan(event_type, field, data, rng)
 	phase = "island"
-	cube_roll = is_cube()
+	cube_roll = is_cube() and not field.one_way()
 	cube_lost = 0
 	cube_echo_base = echo_gain.duplicate()
 	if is_cube() and steel > 0 and not island.get("steel_applied", false):
@@ -302,7 +302,7 @@ func cube_cfg() -> Dictionary:
 func roll_options() -> Array:
 	if not is_cube() or not cube_roll:
 		return []
-	return field.side_faces().keys()
+	return field.roll_targets()
 
 
 func roll(face: int) -> bool:
@@ -331,7 +331,7 @@ func cube_shortfall(face: int = -1, sc: Dictionary = {}) -> int:
 	if sc.is_empty():
 		sc = score()
 	var have: Dictionary = cube_have(sc) if face == field.top() else sc["faces"][face]
-	return CubeField.shortfall(have, field.seals[face])
+	return ShapeField.shortfall(have, field.seals[face])
 
 
 # ---------------------------------------------------------------- остров
@@ -531,11 +531,11 @@ func _finish_field() -> Dictionary:
 		# Оставшиеся печати бьют разом (нехватка по нынешнему доходу грани)
 		var strike := 0
 		for f in field.sealed_faces():
-			strike += CubeField.shortfall(sc["faces"][f], field.seals[f]) * int(island["boss"].get("life_per_missing", 1))
+			strike += ShapeField.shortfall(sc["faces"][f], field.seals[f]) * int(island["boss"].get("life_per_missing", 1))
 		res["boss"] = island["boss"].duplicate()
-		res["cube"] = {"broken": 6 - field.sealed_faces().size(), "faces": 6, "lost_turns": cube_lost, "strike": strike, "turns": turn}
+		res["cube"] = {"broken": field.face_count() - field.sealed_faces().size(), "faces": field.face_count(), "lost_turns": cube_lost, "strike": strike, "turns": turn}
 		res["boss_missing"] = cube_lost + strike
-		res["boss_total"] = 6 - field.sealed_faces().size()
+		res["boss_total"] = field.face_count() - field.sealed_faces().size()
 		lost += strike
 		res["lives_before"] = lives + cube_lost
 	elif is_boss():

@@ -230,34 +230,37 @@ func test_run_flow() -> void:
 		if int(run.stock[res]) < int(stock_before[res]) + int(prod[res]):
 			ok = false
 	_check(ok, "весь доход острова (поле + Эхо) ушёл в казну, платы нет")
-	# Конец первого спринта — рынок
-	for _k in 2:
-		run.choose_island(0)
-		for _t in 3:
-			run.end_turn()
-	_check(run.phase == "market" and run.market["buy"].size() == 3, "после спринта — рынок с 3 картами")
-	run.leave_market()
-	_check(run.phase == "map" and run.sprint == 1, "с рынка — в следующий спринт")
-	# Босс на последнем острове 2-го спринта
-	run.choose_island(0)
-	for _t in 3:
-		run.end_turn()
+	# Конец первого спринта: босс-тетраэдр
 	run.choose_island(0)
 	for _t in 3:
 		run.end_turn()
 	_check(run.choices.size() == 1 and run.choices[0].has("boss"), "перед боссом — один остров с боссом")
 	run.choose_island(0)
-	_check(run.is_cube() and run.cube_roll, "босс 2-го спринта — куб, сначала нужно катить")
+	_check(run.is_cube() and run.cube_roll and run.field.shape == "tetra", "босс 1-го спринта — тетраэдр, сначала нужно катить")
 	_check(run.end_turn().is_empty(), "без поворота проверить печать нельзя")
 	var opts: Array = run.roll_options()
-	_check(opts.size() == 4, "катить можно на 4 соседние грани")
+	_check(opts.size() == 3, "тетраэдр катится на любую из 3 других граней")
 	run.roll(opts[0])
-	_check(run.field.top() == opts[0] and not run.cube_roll and run.plays_left == run.plays_per_turn(), "куб повернулся, можно строить")
+	_check(run.field.top() == opts[0] and not run.cube_roll and run.plays_left == run.plays_per_turn(), "фигура повернулась, можно строить")
 	var lives := run.lives
 	var miss: int = run.cube_shortfall()
 	r = run.end_turn()
 	_check(r.has("cube") and r["cube"]["miss"] == miss and run.lives == lives - miss, "пустая грань: минус жизнь за каждую недостающую единицу (%d)" % miss)
 	_check(run.cube_roll and run.turn == 2, "следующий ход снова начинается с поворота")
+	run.lives = 99
+	var guard := 0
+	while run.phase == "island" and guard < 20:
+		LandBot.play_turn(run, true)
+		run.end_turn()
+		guard += 1
+	_check(run.phase == "market" and run.market["buy"].size() == 3, "после босса спринта — рынок с 3 картами")
+	run.leave_market()
+	_check(run.phase == "map" and run.sprint == 1, "с рынка — в следующий спринт")
+	# Барабан катится сам и только вперёд
+	var ShapeField = LandRun.ShapeField
+	var d = ShapeField.new("drum")
+	var t0: int = d.top()
+	_check(d.one_way() and d.roll_targets() == [(t0 + 1) % 6], "барабан: следующая грань одна, назад нельзя")
 	var run2 = _play(11)
 	_check(run2.game_over, "забег ботом доходит до конца (остров %d, жизни %d)" % [run2.field_index, run2.lives])
 	var wins := 0
@@ -268,8 +271,8 @@ func test_run_flow() -> void:
 
 
 func test_cube() -> void:
-	var CubeField = LandRun.CubeField
-	var c = CubeField.new()
+	var ShapeField = LandRun.ShapeField
+	var c = ShapeField.new()
 	var four := true
 	for i in 54:
 		if c.nbs(i).size() != 4:
@@ -277,7 +280,7 @@ func test_cube() -> void:
 	_check(four, "куб: у каждой клетки 4 соседа (через рёбра тоже)")
 	var cross := 0
 	for j in c.nbs(0):
-		if CubeField.face_of(j) != 0:
+		if c.face_of(j) != 0:
 			cross += 1
 	_check(cross == 2, "угловая клетка грани соседствует с двумя другими гранями")
 	var t0: int = c.top()
@@ -291,16 +294,16 @@ func test_cube() -> void:
 	var other := -1
 	for i in range(top * 9, top * 9 + 9):
 		for j in c.nbs(i):
-			if CubeField.face_of(j) != top and edge < 0:
+			if c.face_of(j) != top and edge < 0:
 				edge = i
 				other = j
 	c.content[edge] = "mill"
 	c.content[other] = "field"
 	var sc: Dictionary = c.score(data)
 	_check(int(sc["total"].get("food", 0)) == data.val("mill", "self") + data.val("mill", "per_base"), "Мельница на ребре получает бонус от Поля на соседней грани")
-	_check(int(sc["faces"][CubeField.face_of(other)].get("food", 0)) == data.val("field", "base"), "Поле считается на своей грани")
+	_check(int(sc["faces"][c.face_of(other)].get("food", 0)) == data.val("field", "base"), "Поле считается на своей грани")
 	c.seals[top] = {"food": 5, "gold": 1}
-	_check(CubeField.shortfall({"food": 4, "wild": 1}, c.seals[top]) == 1, "печать: джокер закрывает одну недостающую единицу")
+	_check(ShapeField.shortfall({"food": 4, "wild": 1}, c.seals[top]) == 1, "печать: джокер закрывает одну недостающую единицу")
 	_check(not c.is_free(other), "на боковой грани строить нельзя")
 	# Бой: снятая печать, итог
 	var run := LandRun.new()
@@ -325,8 +328,21 @@ func test_cube() -> void:
 		if r.get("field_done", false):
 			res = r["result"]
 		guard += 1
-	_check(res.has("cube") and int(res["cube"]["turns"]) <= int(run.cube_cfg().get("max_turns", 12)), "бой с кубом заканчивается (снято %d из 6 за %d ходов)" % [res.get("cube", {}).get("broken", -1), res.get("cube", {}).get("turns", -1)])
-	_check(run.phase == "market", "после куба — рынок")
+	_check(res.has("cube") and int(res["cube"]["turns"]) <= int(run.cube_cfg().get("max_turns", 12)), "бой с фигурой заканчивается (снято %d из %d за %d ходов)" % [res.get("cube", {}).get("broken", -1), res.get("cube", {}).get("faces", -1), res.get("cube", {}).get("turns", -1)])
+	_check(run.phase == "market", "после босса-фигуры — рынок")
+	# Тетраэдр и барабан: соседство клеток и граней
+	var t = ShapeField.new("tetra")
+	var tri := true
+	for i in t.cells_n():
+		if t.nbs(i).size() != 3:
+			tri = false
+	_check(t.cells_n() == 36 and tri and t.roll_targets().size() == 3, "тетраэдр: 36 треугольных клеток по 3 соседа, все грани рядом")
+	var d = ShapeField.new("drum")
+	var ok := d.cells_n() == 54
+	for i in d.cells_n():
+		if not (d.nbs(i).size() in [3, 4]):
+			ok = false
+	_check(ok and d.side_faces().size() == 2, "барабан: 6 граней по кругу, у верхней 2 соседние")
 
 
 func test_finish_early() -> void:

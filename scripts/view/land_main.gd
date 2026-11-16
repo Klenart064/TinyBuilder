@@ -8,7 +8,7 @@ const LandField = preload("res://scripts/land/land_field.gd")
 const LandEvents = preload("res://scripts/land/land_events.gd")
 const Models = preload("res://scripts/view/models.gd")
 const LandBot = preload("res://scripts/land/land_bot.gd")
-const CubeField = preload("res://scripts/land/cube_field.gd")
+const ShapeField = preload("res://scripts/land/shape_field.gd")
 
 const STEP := 1.15
 const TILE_COLOR := Color("#5d7a3a")
@@ -26,11 +26,19 @@ const ECHO_COLOR := Color("#5fe3ff")
 const SEAL_COLOR := Color("#ffb347")
 const SEAL_DONE_COLOR := Color("#6fcf97")
 const CAMERA_BASE := Vector3(7.3, 7.1, 7.3)
+const SHAPE_WORD := {"cube": "куб", "tetra": "тетраэдр", "drum": "барабан"}
+const SHAPE_DESC := {
+	"cube": "Куб: 6 граней 3×3, на каждой печать (схема слева). Каждый ход катите куб на любую соседнюю грань.",
+	"tetra": "Тетраэдр: 4 треугольные грани по 9 клеток, на каждой печать (схема слева). Каждая грань соседствует со всеми остальными — катите на любую. Клетки треугольные: у каждой 3 соседа.",
+	"drum": "Барабан: 6 граней 3×3 по кругу, на каждой печать (схема слева). Крутится сам и только вперёд — порядок граней виден заранее, выбирать нельзя. Готовьте следующие грани заранее.",
+}
 
 ## Куб: на какую грань сейчас наведена мышь (для выбора поворота)
 var roll_hover := -1
 ## Куб: поворот камеры вокруг куба (Q/E), радианы
 var cam_yaw := 0.0
+## Масштаб значков над полем (у больших фигур камера дальше)
+var badge_k := 1.0
 var _cam_turning := false
 
 var data
@@ -137,15 +145,19 @@ func _build_world() -> void:
 
 func cell_pos(i: int) -> Vector3:
 	if _is_cube():
-		return run.field.orient * CubeField.center(i) * STEP + _cube_off()
+		return run.field.orient * run.field.center(i) * STEP + _cube_off()
 	return Vector3((i % LandField.SIZE - 1.5) * STEP, 0, (i / LandField.SIZE - 1.5) * STEP)
 
 
 ## Куда «вверх» смотрит клетка (у куба — нормаль её грани).
 func cell_up(i: int) -> Vector3:
 	if _is_cube():
-		return run.field.world_normal(CubeField.face_of(i))
+		return run.field.world_normal(run.field.face_of(i))
 	return Vector3.UP
+
+
+func _shape_word() -> String:
+	return SHAPE_WORD.get(run.field.shape, "куб") if _is_cube() else "куб"
 
 
 func _is_cube() -> bool:
@@ -154,13 +166,43 @@ func _is_cube() -> bool:
 
 ## Центр куба: верхняя грань на высоте обычного острова (y = 0).
 func _cube_off() -> Vector3:
-	return Vector3(0, -1.5 * STEP, 0)
+	return Vector3(0, -run.field.face_dist(0) * STEP, 0)
 
 
 ## Видна ли клетка с камеры (верх, +X, +Z).
 func _cell_visible(i: int) -> bool:
 	var n := cell_up(i)
 	return n.y > 0.5 or n.dot(Vector3(1, 0, 1).rotated(Vector3.UP, cam_yaw)) > 0.5
+
+
+## Плитка-призма: многоугольник pts (мир) — верх, толщина вниз по -n.
+static func _poly_prism(pts: Array, n: Vector3, depth: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(-1)
+	var bot := []
+	for p in pts:
+		bot.append(p - n * depth)
+	var k := pts.size()
+	# порядок обхода так, чтобы верх смотрел по n
+	var ccw: bool = (pts[1] - pts[0]).cross(pts[2] - pts[0]).dot(n) > 0
+	for t in range(1, k - 1):
+		if ccw:
+			st.add_vertex(pts[0]); st.add_vertex(pts[t + 1]); st.add_vertex(pts[t])
+			st.add_vertex(bot[0]); st.add_vertex(bot[t]); st.add_vertex(bot[t + 1])
+		else:
+			st.add_vertex(pts[0]); st.add_vertex(pts[t]); st.add_vertex(pts[t + 1])
+			st.add_vertex(bot[0]); st.add_vertex(bot[t + 1]); st.add_vertex(bot[t])
+	for a in k:
+		var b := (a + 1) % k
+		if ccw:
+			st.add_vertex(pts[a]); st.add_vertex(pts[b]); st.add_vertex(bot[b])
+			st.add_vertex(pts[a]); st.add_vertex(bot[b]); st.add_vertex(bot[a])
+		else:
+			st.add_vertex(pts[a]); st.add_vertex(bot[b]); st.add_vertex(pts[b])
+			st.add_vertex(pts[a]); st.add_vertex(bot[a]); st.add_vertex(bot[b])
+	st.generate_normals()
+	return st.commit()
 
 
 ## Поворот, который кладёт «верх» модели на нормаль n.
@@ -344,11 +386,38 @@ func _rebuild_board() -> void:
 	var cube := _is_cube()
 	_update_camera()
 	if cube:
-		var core := MeshInstance3D.new()
-		core.mesh = _box_mesh(Vector3.ONE * (3.0 * STEP - 0.25))
-		core.position = _cube_off()
-		core.material_override = _mat(Color("#4a3a2a"))
-		board_root.add_child(core)
+		# Барабан: торцы-шестиугольники
+		if f.shape == "drum":
+			for sx in [-1.0, 1.0]:
+				var hex := []
+				for face in f.face_count():
+					for v in f.face_poly(face):
+						if absf(v.x - sx * 1.5) < 0.01:
+							var dup := false
+							for h in hex:
+								if (h as Vector3).distance_to(v) < 0.01:
+									dup = true
+							if not dup:
+								hex.append(v)
+				hex.sort_custom(func(a, b): return atan2(a.y, a.z) < atan2(b.y, b.z))
+				var pts := []
+				var n: Vector3 = f.orient * Vector3(sx, 0, 0)
+				for v in hex:
+					pts.append(f.orient * v * STEP + _cube_off() + n * 0.05)
+				var cap := MeshInstance3D.new()
+				cap.mesh = _poly_prism(pts, n, 0.3)
+				cap.material_override = _mat(Color("#8a8178"))
+				board_root.add_child(cap)
+		# Тело фигуры: пластины граней чуть под клетками
+		for face in f.face_count():
+			var n: Vector3 = f.world_normal(face)
+			var pts := []
+			for v in f.face_poly(face):
+				pts.append(f.orient * v * STEP + _cube_off() - n * 0.22)
+			var core := MeshInstance3D.new()
+			core.mesh = _poly_prism(pts, n, 0.12)
+			core.material_override = _mat(Color("#4a3a2a"))
+			board_root.add_child(core)
 	for i in f.cells_n():
 		tiles.append(null)
 		tile_mats.append(null)
@@ -364,12 +433,18 @@ func _rebuild_board() -> void:
 			board_root.add_child(mi)
 			continue
 		var tile := MeshInstance3D.new()
-		tile.mesh = _box_mesh(Vector3(1.05, 0.3, 1.05))
-		tile.position = p - cell_up(i) * 0.15
 		if cube:
-			tile.basis = _face_basis(cell_up(i))
+			var pts := []
+			var cw: Vector3 = p
+			for v in f.poly(i):
+				var w: Vector3 = f.orient * v * STEP + _cube_off()
+				pts.append(cw + (w - cw) * 0.93)
+			tile.mesh = _poly_prism(pts, cell_up(i), 0.3)
+		else:
+			tile.mesh = _box_mesh(Vector3(1.05, 0.3, 1.05))
+			tile.position = p - cell_up(i) * 0.15
 		var base := _tile_color(i)
-		if cube and f.broken[CubeField.face_of(i)]:
+		if cube and f.broken[run.field.face_of(i)]:
 			base = base.lerp(Color("#9bbf6a"), 0.35)
 		var mat := _mat(base)
 		tile.material_override = mat
@@ -378,11 +453,12 @@ func _rebuild_board() -> void:
 		tile_mats[i] = mat
 		tile_base[i] = base
 		# Земляной «бок» под клеткой
-		var dirt := MeshInstance3D.new()
-		dirt.mesh = _box_mesh(Vector3(1.0, 0.4, 1.0))
-		dirt.position = Vector3(0, -0.3, 0)
-		dirt.material_override = _mat(Color("#4a3a2a"))
-		tile.add_child(dirt)
+		if not cube:
+			var dirt := MeshInstance3D.new()
+			dirt.mesh = _box_mesh(Vector3(1.0, 0.4, 1.0))
+			dirt.position = Vector3(0, -0.3, 0)
+			dirt.material_override = _mat(Color("#4a3a2a"))
+			tile.add_child(dirt)
 		if f.terrain[i] != "":
 			_terrain_label(i)
 		var id: String = f.content[i]
@@ -392,6 +468,8 @@ func _rebuild_board() -> void:
 			node.position = p
 			if cube:
 				node.basis = _face_basis(cell_up(i))
+				if f.is_tri():
+					node.basis = node.basis.scaled(Vector3.ONE * 0.72)
 			board_root.add_child(node)
 			objs[i] = node
 
@@ -592,7 +670,7 @@ func _update_hover() -> void:
 				c = c.lerp(TILE_DANGER_COLOR, 0.5)
 			if i == hover:
 				c = TILE_HOVER_COLOR
-		elif _is_cube() and run.cube_roll and roll_hover >= 0 and CubeField.face_of(i) == roll_hover:
+		elif _is_cube() and run.cube_roll and roll_hover >= 0 and run.field.face_of(i) == roll_hover:
 			c = c.lerp(SEAL_COLOR, 0.45)
 		tile_mats[i].albedo_color = c
 
@@ -654,7 +732,7 @@ func _text_badge(text: String, size: int, color: Color) -> Label3D:
 	lbl.font_size = size
 	lbl.outline_size = int(size * 0.4)
 	lbl.outline_modulate = Color(0, 0, 0, 0.85)
-	lbl.pixel_size = 0.006
+	lbl.pixel_size = 0.006 * badge_k
 	lbl.text = text
 	lbl.modulate = color
 	return lbl
@@ -672,7 +750,7 @@ func _heart_badge(v: int, size: int) -> Node3D:
 	spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	spr.no_depth_test = true
 	spr.render_priority = 6
-	spr.pixel_size = 0.006 * size * 1.0 / 64.0
+	spr.pixel_size = 0.006 * badge_k * size * 1.0 / 64.0
 	var k_px := 64.0 / (size * 1.0)
 	spr.offset = Vector2(size * 0.6 * k_px, 0)
 	root.add_child(spr)
@@ -700,7 +778,7 @@ func _make_badge(amounts: Dictionary, font_size: int, tint: Color, priority: int
 		lbl.font_size = font_size
 		lbl.outline_size = int(font_size * 0.4)
 		lbl.outline_modulate = Color(0, 0, 0, 0.85 * tint.a)
-		lbl.pixel_size = 0.006
+		lbl.pixel_size = 0.006 * badge_k
 		lbl.text = "%s%d" % ["+" if v > 0 else "", v]
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		lbl.offset = Vector2(-font_size * 0.05, y)
@@ -711,7 +789,7 @@ func _make_badge(amounts: Dictionary, font_size: int, tint: Color, priority: int
 		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		spr.no_depth_test = true
 		spr.render_priority = priority
-		spr.pixel_size = 0.006 * font_size * 1.1 / 64.0
+		spr.pixel_size = 0.006 * badge_k * font_size * 1.1 / 64.0
 		var k_px := 64.0 / (font_size * 1.1)
 		spr.offset = Vector2(font_size * 0.6 * k_px, y * k_px)
 		spr.modulate = Color(1, 1, 1, tint.a)
@@ -1250,7 +1328,7 @@ func _refresh_info() -> void:
 		if not nb.is_empty():
 			var left := int(nb["islands_left"])
 			if nb.has("cube"):
-				info_box.add_child(_rich_line("[color=#eb5757]%s[/color] через %d %s: 6 печатей на гранях куба" % [nb["name"], left, _plural(left, "остров", "острова", "островов")], 14))
+				info_box.add_child(_rich_line("[color=#eb5757]%s[/color] через %d %s: печати на гранях фигуры (%s)" % [nb["name"], left, _plural(left, "остров", "острова", "островов"), SHAPE_WORD.get(nb["cube"].get("shape", "cube"), "куб")], 14))
 			else:
 				info_box.add_child(_rich_line("[color=#eb5757]%s[/color] через %d %s: нужно [b]%d[/b] за остров" % [nb["name"], left, _plural(left, "остров", "острова", "островов"), run.boss_need(nb)], 14))
 
@@ -1316,7 +1394,7 @@ func _refresh_side() -> void:
 	steps += "[color=#f2c94c]Рынок[/color]" if run.sprint < run.sprints().size() - 1 else "[color=#f2c94c]Финал[/color]"
 	rb0.add_child(_rich_line(steps, 15))
 	if run.is_cube() and _is_cube():
-		var nb := _section(side_box, "Грани куба", SEAL_COLOR, 17)
+		var nb := _section(side_box, "Грани: %s" % _shape_word(), SEAL_COLOR, 17)
 		nb.get_parent().tooltip_text = "Схема как на экране: в центре верхняя грань, вокруг — 4 стороны, куда можно катить. Число — сколько грань даёт сейчас / сколько нужно."
 		nb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 		var cc := CenterContainer.new()
@@ -1360,10 +1438,11 @@ func _refresh_side() -> void:
 	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
 	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
 	t += "[color=#eb5757]Босс[/color]: на его острове нужно произвести N всего, иначе −1%s за единицу.\n" % _heart_img(14)
+	t += "[color=#ffb347]Тетраэдр[/color]: 4 треугольные грани, каждая соседка всех остальных — катите на любую. [color=#ffb347]Барабан[/color]: 6 граней по кругу, крутится только вперёд сам, всё видно заранее.\n"
 	t += "[color=#ffb347]Каменный куб[/color]: 6 граней с печатями. Каждый ход катите куб на соседнюю грань и стройте на верхней. В конце хода печать верхней грани проверяют: хватает — снята, нет — −1%s за каждую недостающую единицу. Здания на краю — соседи зданий соседней грани.\n" % _heart_img(14)
 	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
-	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран, F2 сразу к кубу, Q/E вращать камеру у куба[/color]"
+	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран, F2 куб, F3 тетраэдр, F4 барабан — сразу к боссу; Q/E вращать камеру[/color]"
 	rb.add_child(_rich_line(t, 13))
 
 
@@ -1538,7 +1617,7 @@ func _refresh_hint() -> void:
 	if busy and _treasury_shown != null:
 		s = "[color=#5fe3ff][b]Эхо ×%d![/b] Здания срабатывают ещё раз…[/color]" % _echo_count
 	elif busy and _is_cube():
-		s = "[color=#ffb347]Куб поворачивается…[/color]"
+		s = "[color=#ffb347]%s поворачивается…[/color]" % _shape_word().capitalize()
 	elif busy:
 		s = "[color=#c58cff]Ходит земля…[/color]"
 	elif _is_cube() and run.phase == "island" and run.cube_roll:
@@ -1547,7 +1626,10 @@ func _refresh_hint() -> void:
 			if f.broken[roll_hover]:
 				s += "  [color=#6fcf97](уже снята — передышка)[/color]"
 		else:
-			s = "[color=#ffb347][b]Куда катить куб?[/b][/color] Кликните по стороне куба или по грани на схеме слева"
+			if f.one_way():
+				s = "Барабан поворачивается к следующей грани..."
+			else:
+				s = "[color=#ffb347][b]Куда катить %s?[/b][/color] Кликните по стороне фигуры или по грани на схеме справа" % _shape_word()
 	elif run.plays_left <= 0:
 		s = "Нажмите [b]Ход земли[/b]"
 	elif selected >= 0 and selected < run.hand.size() and f.is_free(hover):
@@ -1603,8 +1685,8 @@ func _input(event: InputEvent) -> void:
 		elif (event.keycode == KEY_Q or event.keycode == KEY_E) and _is_cube() and not overlay.visible:
 			_turn_camera(1 if event.keycode == KEY_Q else -1)
 			get_viewport().set_input_as_handled()
-		elif event.keycode == KEY_F2 and not busy:
-			_skip_to_cube()
+		elif event.keycode in [KEY_F2, KEY_F3, KEY_F4] and not busy:
+			_skip_to_cube({KEY_F2: "cube", KEY_F3: "tetra", KEY_F4: "drum"}[event.keycode])
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_D and not busy:
 			_show_deck()
@@ -1781,6 +1863,9 @@ func _on_end_turn() -> void:
 	_full_refresh()
 	if r.get("field_done", false):
 		_show_field_result(r["result"])
+	elif _is_cube() and run.cube_roll and run.field.one_way():
+		await get_tree().create_timer(0.35).timeout
+		_on_roll(run.roll_options()[0])
 
 
 func _on_claim() -> void:
@@ -2034,7 +2119,7 @@ func _refresh_map_detail() -> void:
 	var t := ""
 	if isl.has("boss") and isl["boss"].has("cube"):
 		var cc_: Dictionary = isl["boss"]["cube"]
-		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\n6 граней 3×3, на каждой печать (схема слева). Каждый ход катите куб на соседнюю грань и стройте [b]%d[/b] карты на верхней. В конце хода печать верхней грани проверяют: не хватило — −1%s за единицу. Снимите все печати за %d ходов.\n" % [isl["boss"]["name"], int(cc_.get("plays_per_turn", 2)), _heart_img(), int(cc_.get("max_turns", 12))]
+		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\n%s Стройте [b]%d[/b] карты на верхней грани. В конце хода её печать проверяют: не хватило — −1%s за единицу. Снимите все печати за %d ходов.\n" % [isl["boss"]["name"], SHAPE_DESC.get(cc_.get("shape", "cube"), ""), int(cc_.get("plays_per_turn", 2)), _heart_img(), int(cc_.get("max_turns", 12))]
 	elif isl.has("boss"):
 		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПроизведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], run.boss_need(isl["boss"]), _heart_img()]
 	else:
@@ -2399,11 +2484,17 @@ func _update_camera() -> void:
 	var look := Vector3(0.3, 0, 0.3)
 	var shift := Vector3(0, -0.9, 0)
 	camera.size = 7.8
+	badge_k = 1.0
 	var off := Vector3(7, 8, 7)
 	if _is_cube():
-		look = Vector3(0, -1.45, 0)
-		shift = Vector3(0, -1.6, 0)
-		camera.size = 10.4
+		var rb := 0.0
+		for i in run.field.cells_n():
+			for v in run.field.poly(i):
+				rb = maxf(rb, (v as Vector3).length())
+		look = _cube_off() + Vector3(0, 0.27, 0)
+		shift = Vector3(0, -1.6, 0) * rb / 2.6
+		camera.size = rb * STEP * 3.5
+		badge_k = maxf(1.0, camera.size / 10.4)
 		off = off.rotated(Vector3.UP, cam_yaw)
 	camera.position = look + off
 	camera.look_at(look, Vector3.UP)
@@ -2413,8 +2504,8 @@ func _update_camera() -> void:
 func _top_cells() -> Array:
 	var out := []
 	var t: int = run.field.top()
-	for k in 9:
-		out.append(t * 9 + k)
+	for i in run.field.face_cells(t):
+		out.append(i)
 	return out
 
 
@@ -2437,12 +2528,26 @@ func _cube_face_at(screen_pos: Vector2) -> int:
 		return -1
 	var t := -from.y / dir.y
 	var p := from + dir * t
-	var half := 1.5 * STEP
-	if absf(p.x) <= half and absf(p.z) <= half:
+	if _in_top_face(p):
 		return -1
-	var d := Vector3(signf(p.x), 0, 0) if absf(p.x) > absf(p.z) else Vector3(0, 0, signf(p.z))
-	var f: int = run.field.face_at(d)
-	return f if f in run.roll_options() else -1
+	var d := Vector3(p.x, 0, p.z).normalized()
+	var best := -1
+	var bv := -2.0
+	var sides: Dictionary = run.field.side_faces()
+	for f in run.roll_options():
+		if sides.has(f) and sides[f].dot(d) > bv:
+			bv = sides[f].dot(d)
+			best = f
+	return best
+
+
+## Точка на плоскости y=0 внутри верхней грани?
+func _in_top_face(p: Vector3) -> bool:
+	var pts := []
+	for v in run.field.face_poly(run.field.top()):
+		var w: Vector3 = run.field.orient * v * STEP + _cube_off()
+		pts.append(Vector2(w.x, w.z))
+	return Geometry2D.is_point_in_polygon(Vector2(p.x, p.z), PackedVector2Array(pts))
 
 
 ## Печать грани текстом: «3/5 [золото]» по каждому ресурсу; снятая — зелёным.
@@ -2476,13 +2581,15 @@ func _seal_text_of(f, face: int, size: int, sc: Dictionary) -> String:
 ## Печати на кубе: значки над краями верхней грани (куда можно катить) и стрелки при выборе.
 func _cube_extras(sc: Dictionary) -> void:
 	var f = run.field
-	var half := 1.5 * STEP
 	var sides: Dictionary = f.side_faces()
 	var opts: Array = run.roll_options() if run.phase == "island" else []
+	var top: int = f.top()
 	for face in sides:
 		var d: Vector3 = sides[face]
+		var mid: Vector3 = f.orient * f.shared_edge_mid(top, face) * STEP + _cube_off()
+		mid.y = 0
 		var holder := Node3D.new()
-		holder.position = d * (half + 0.95) + Vector3(0, 0.25, 0)
+		holder.position = mid + d * 0.95 + Vector3(0, 0.25, 0)
 		board_root.add_child(holder)
 		if f.broken[face]:
 			holder.add_child(_text_badge("снята", 34, SEAL_DONE_COLOR))
@@ -2493,8 +2600,9 @@ func _cube_extras(sc: Dictionary) -> void:
 				lines.append([r, int(have.get(r, 0)), int(f.seals[face][r])])
 			holder.add_child(_seal_badge(lines, 38, face == roll_hover))
 		if face in opts:
-			var ar := _arrow_node(_dir_index(d), SEAL_COLOR if face == roll_hover else Color("#ffe3a3"), 0.95)
-			ar.position = d * (half - 0.65) + Vector3(0, 0.02, 0)
+			var ar := _arrow_node(0, SEAL_COLOR if face == roll_hover else Color("#ffe3a3"), 0.95)
+			ar.position = mid - d * 0.65 + Vector3(0, 0.02, 0)
+			ar.rotation.y = atan2(-d.x, -d.z)
 			ar.scale = Vector3.ONE * 1.6
 			board_root.add_child(ar)
 
@@ -2518,7 +2626,7 @@ func _seal_badge(lines: Array, font_size: int, hot: bool) -> Node3D:
 		spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		spr.no_depth_test = true
 		spr.render_priority = 6
-		spr.pixel_size = 0.006 * font_size * 1.1 / 64.0
+		spr.pixel_size = 0.006 * badge_k * font_size * 1.1 / 64.0
 		var k_px := 64.0 / (font_size * 1.1)
 		spr.offset = Vector2(font_size * 0.6 * k_px, y * k_px)
 		root.add_child(spr)
@@ -2529,12 +2637,14 @@ func _seal_badge(lines: Array, font_size: int, hot: bool) -> Node3D:
 func _cube_info(sc: Dictionary) -> void:
 	var f = run.field
 	var b: Dictionary = run.island["boss"]
-	var broken: int = 6 - f.sealed_faces().size()
-	var bb := _section(info_box, "Босс: %s · печати %d/6" % [b["name"], broken], Color("#eb5757"), 19)
+	var broken: int = f.face_count() - f.sealed_faces().size()
+	var bb := _section(info_box, "Босс: %s · печати %d/%d" % [b["name"], broken, f.face_count()], Color("#eb5757"), 19)
 	bb.get_parent().tooltip_text = "Каждый ход катите куб на соседнюю грань и стройте на верхней. В конце хода её печать проверяют: хватает — снята, нет — −1 жизнь за каждую недостающую единицу. Здания на краю грани — соседи зданий соседней грани. Не снятые к последнему ходу печати бьют разом."
 	bb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-	if run.cube_roll:
-		bb.add_child(_rich_line("[color=#ffb347][b]Куда катить куб?[/b][/color] Кликните по стороне куба или по грани на схеме.", 15))
+	if run.cube_roll and f.one_way():
+		bb.add_child(_rich_line("Барабан поворачивается к следующей грани: назад дороги нет.", 15))
+	elif run.cube_roll:
+		bb.add_child(_rich_line("[color=#ffb347][b]Куда катить %s?[/b][/color] Кликните по стороне фигуры или по грани на схеме справа." % _shape_word(), 15))
 	else:
 		var top: int = f.top()
 		if f.broken[top]:
@@ -2561,46 +2671,91 @@ func _cube_net(f, interactive: bool, sc: Dictionary = {}) -> Control:
 	# Экранные оси на земле: вправо и «от зрителя»
 	var right := Vector3(1, 0, -1).normalized().rotated(Vector3.UP, yaw)
 	var away := Vector3(-1, 0, -1).normalized().rotated(Vector3.UP, yaw)
-	var sides: Dictionary = f.side_faces()
-	var near_dir := Vector3.ZERO
-	for face in sides:
-		if near_dir == Vector3.ZERO or sides[face].dot(away) < near_dir.dot(away):
-			near_dir = sides[face]
 	var opts: Array = run.roll_options() if interactive else []
-	# Развёртка: клетка → точка на плоскости (x, z) в клетках
-	var cells := {}
-	var centers := {}
-	for face in 6:
-		var n: Vector3 = f.world_normal(face)
-		var acc := Vector3.ZERO
-		for k in 9:
-			var i: int = face * 9 + k
-			var w: Vector3 = f.orient * CubeField.center(i)
-			var u := Vector3(w.x, 0, w.z)
-			if n.y < -0.5:
-				u = u - near_dir * 2.0 * near_dir.dot(u) + near_dir * 6.0
-			elif absf(n.y) < 0.5:
-				u = u + Vector3(n.x, 0, n.z) * (1.5 - w.y)
-			cells[i] = u
-			acc += u
-		centers[face] = acc / 9.0
+	# Развёртка: каждая грань откидывается на плоскость верхней вокруг общего ребра с соседкой,
+	# уже лежащей на плоскости (дальние грани — к ближней к зрителю стороне).
+	var nf: int = f.face_count()
+	var tr := {}
+	var top: int = f.top()
+	tr[top] = Transform3D.IDENTITY
+	var fnb: Array = f.g()["fnb"]
+	var wpoly := func(face: int) -> Array:
+		var out := []
+		for v in f.face_poly(face):
+			out.append(f.orient * v)
+		return out
+	var guard := 0
+	while tr.size() < nf and guard < 12:
+		guard += 1
+		var add := {}
+		for face in nf:
+			if tr.has(face):
+				continue
+			var best := -1
+			var bv := INF
+			for par in fnb[face]:
+				if not tr.has(par):
+					continue
+				var c := Vector3.ZERO
+				for v in wpoly.call(par):
+					c += tr[par] * v
+				var v2 := c.dot(away)
+				if v2 < bv:
+					bv = v2
+					best = par
+			if best < 0:
+				continue
+			var shared := []
+			for p in wpoly.call(face):
+				for q in wpoly.call(best):
+					if (p as Vector3).distance_to(q) < 0.01:
+						shared.append(p)
+			var a0: Vector3 = shared[0]
+			var e: Vector3 = (shared[1] - shared[0]).normalized()
+			var ng: Vector3 = f.world_normal(face)
+			var np: Vector3 = f.world_normal(best)
+			var th := atan2(e.dot(ng.cross(np)), ng.dot(np))
+			var hinge := Transform3D(Basis(e, th), Vector3.ZERO)
+			hinge = Transform3D(Basis.IDENTITY, a0) * hinge * Transform3D(Basis.IDENTITY, -a0)
+			add[face] = tr[best] * hinge
+		if add.is_empty():
+			break
+		for k in add:
+			tr[k] = add[k]
 	var to2 := func(u: Vector3) -> Vector2:
 		return Vector2(u.dot(right), -u.dot(away))
+	var cells := {}
+	var faces2 := {}
 	var lo := Vector2(INF, INF)
 	var hi := Vector2(-INF, -INF)
-	for i in cells:
-		for c in [Vector3(-0.5, 0, -0.5), Vector3(0.5, 0, 0.5), Vector3(-0.5, 0, 0.5), Vector3(0.5, 0, -0.5)]:
-			var p: Vector2 = to2.call(cells[i] + c)
-			lo = Vector2(minf(lo.x, p.x), minf(lo.y, p.y))
-			hi = Vector2(maxf(hi.x, p.x), maxf(hi.y, p.y))
+	for face in tr:
+		var fp := []
+		for v in wpoly.call(face):
+			var q: Vector2 = to2.call(tr[face] * v)
+			fp.append(q)
+			lo = Vector2(minf(lo.x, q.x), minf(lo.y, q.y))
+			hi = Vector2(maxf(hi.x, q.x), maxf(hi.y, q.y))
+		faces2[face] = fp
+		for i in f.face_cells(face):
+			var cp := []
+			var cc := Vector2.ZERO
+			for v in f.poly(i):
+				var q: Vector2 = to2.call(tr[face] * (f.orient * v))
+				cp.append(q)
+				cc += q
+			cc /= cp.size()
+			var shr := []
+			for q in cp:
+				shr.append(cc + (q - cc) * 0.86)
+			cells[i] = shr
 	var scale := minf(244.0 / (hi.x - lo.x), 244.0 / (hi.y - lo.y))
 	var origin := Vector2(125, 125) - (lo + hi) / 2.0 * scale
-	var px := func(u: Vector3) -> Vector2:
-		return origin + to2.call(u) * scale
 	var font: Font = ThemeDB.fallback_font
+	var px := func(q: Vector2) -> Vector2:
+		return origin + q * scale
 	view.draw.connect(func():
 		for i in cells:
-			var face: int = i / 9
+			var face: int = f.face_of(i)
 			var id: String = f.content[i]
 			var col := Color("#5d7a3a")
 			if f.broken[face]:
@@ -2614,14 +2769,17 @@ func _cube_net(f, interactive: bool, sc: Dictionary = {}) -> Control:
 			if face == roll_hover and not f.broken[face]:
 				col = col.lerp(SEAL_COLOR, 0.35)
 			var pts := PackedVector2Array()
-			for c in [Vector3(-0.44, 0, -0.44), Vector3(0.44, 0, -0.44), Vector3(0.44, 0, 0.44), Vector3(-0.44, 0, 0.44)]:
-				pts.append(px.call(cells[i] + c))
+			for q in cells[i]:
+				pts.append(px.call(q))
 			view.draw_colored_polygon(pts, col)
-		for face in 6:
-			var c: Vector3 = centers[face]
+		for face in faces2:
 			var pts := PackedVector2Array()
-			for k in [Vector3(-1.5, 0, -1.5), Vector3(1.5, 0, -1.5), Vector3(1.5, 0, 1.5), Vector3(-1.5, 0, 1.5), Vector3(-1.5, 0, -1.5)]:
-				pts.append(px.call(c + k))
+			var c := Vector2.ZERO
+			for q in faces2[face]:
+				pts.append(px.call(q))
+				c += px.call(q)
+			c /= faces2[face].size()
+			pts.append(pts[0])
 			var bc := Color("#4a5566")
 			var w := 1.5
 			if face == f.top():
@@ -2631,7 +2789,6 @@ func _cube_net(f, interactive: bool, sc: Dictionary = {}) -> Control:
 				bc = SEAL_COLOR
 				w = 3.0 if face == roll_hover else 2.0
 			view.draw_polyline(pts, bc, w)
-			# Печать в центре грани
 			var lines := []
 			if f.broken[face]:
 				lines.append(["", "снята"])
@@ -2644,15 +2801,14 @@ func _cube_net(f, interactive: bool, sc: Dictionary = {}) -> Control:
 					if not sc.is_empty():
 						t = "%d/%d" % [mini(int(have.get(r, 0)), int(f.seals[face][r])), int(f.seals[face][r])]
 					lines.append([r, t])
-			var center: Vector2 = px.call(c)
-			var y0 := center.y - (lines.size() - 1) * 9.0
+			var y0 := c.y - (lines.size() - 1) * 9.0
 			for k in lines.size():
 				var r: String = lines[k][0]
 				var t: String = lines[k][1]
 				var fs := 15
 				var tw := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 				var total := tw + (16.0 if r != "" else 0.0)
-				var x := center.x - total / 2.0
+				var x := c.x - total / 2.0
 				var y := y0 + k * 18.0
 				view.draw_rect(Rect2(x - 3, y - 9, total + 6, 18), Color(0, 0, 0, 0.55))
 				var tc := Color("#6fcf97") if r == "" else Color.WHITE
@@ -2664,10 +2820,8 @@ func _cube_net(f, interactive: bool, sc: Dictionary = {}) -> Control:
 	if interactive:
 		var face_at := func(pos: Vector2) -> int:
 			var q: Vector2 = (pos - origin) / scale
-			var u := right * q.x - away * q.y
 			for face in opts:
-				var c: Vector3 = centers[face]
-				if absf(u.x - c.x) <= 1.5 and absf(u.z - c.z) <= 1.5:
+				if faces2.has(face) and Geometry2D.is_point_in_polygon(q, PackedVector2Array(faces2[face])):
 					return face
 			return -1
 		view.gui_input.connect(func(ev: InputEvent):
@@ -2714,11 +2868,12 @@ func _on_roll(face: int) -> void:
 		c.queue_free()
 	_refresh_ui()
 	var axis: Vector3 = run.field.roll_axis(face)
+	var ang: float = run.field.roll_angle(face)
 	var pivot := _cube_off()
 	var tw := create_tween()
 	tw.tween_method(func(a: float):
 		board_root.transform = Transform3D(Basis(axis, a), Vector3.ZERO).translated_local(-pivot).translated(pivot)
-		, 0.0, PI / 2.0, 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		, 0.0, ang, 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await tw.finished
 	board_root.transform = Transform3D.IDENTITY
 	run.roll(face)
@@ -2735,7 +2890,7 @@ func _cube_judge_fx(j: Dictionary) -> float:
 	if j.get("was_broken", false):
 		return 0.0
 	var col := SEAL_DONE_COLOR if j["broken"] else DANGER_COLOR
-	for i in range(int(j["face"]) * 9, int(j["face"]) * 9 + 9):
+	for i in run.field.face_cells(int(j["face"])):
 		_flash_tile(i, col)
 	if j["broken"]:
 		_show_toast("[center][b][color=#6fcf97]Печать снята![/color][/b][/center]")
@@ -2745,16 +2900,17 @@ func _cube_judge_fx(j: Dictionary) -> float:
 
 
 ## F2 (для проверки): новый забег, бот доигрывает до босса-куба, жизни восстановлены.
-func _skip_to_cube() -> void:
+func _skip_to_cube(shape: String = "cube") -> void:
 	for attempt in 20:
 		run.start(data, -1)
-		while not run.game_over and not (run.phase == "map" and run.choices.size() == 1 and run.choices[0].get("boss", {}).has("cube")):
+		while not run.game_over and not (run.phase == "map" and run.choices.size() == 1 and run.choices[0].get("boss", {}).get("cube", {}).get("shape", "") == shape):
 			if run.phase == "map":
 				run.choose_island(LandBot.pick_island(run, true))
 			elif run.phase == "market":
 				LandBot.shop(run, true)
 				run.leave_market()
 			LandBot.play_turn(run, true)
+			run.lives = maxi(run.lives, 30)
 			run.end_turn()
 		if not run.game_over:
 			break
@@ -2764,4 +2920,4 @@ func _skip_to_cube() -> void:
 	_hide_overlay()
 	_full_refresh()
 	_show_map()
-	_show_toast("[center][b]Бот доиграл до Каменного куба[/b]\n[font_size=16]Жизни восстановлены. Выберите куб на карте.[/font_size][/center]")
+	_show_toast("[center][b]Бот доиграл до босса: %s[/b]\n[font_size=16]Жизни восстановлены. Выберите босса на карте.[/font_size][/center]" % SHAPE_WORD.get(shape, shape))
