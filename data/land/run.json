@@ -84,7 +84,13 @@
     {"layers": 3},
     {
       "layers": 3,
-      "boss": {"name": "Набег", "need": 24, "life_per_missing": 1}
+      "boss": {
+        "name": "Каменный куб",
+        "need": 24,
+        "life_per_missing": 1,
+        "_cube_help": "Босс-куб: 6 граней 3×3, на каждой печать (seals — числа, × scale, часть двухцветные с шансом dual_chance). Игрок катит куб на соседнюю грань с печатью, строит на верхней; в конце хода верхнюю грань проверяют: хватает — печать снята, нет — минус жизнь за единицу. Бой до снятия всех печатей или max_turns ходов (тогда оставшиеся бьют разом). В казну — treasury_share дохода всего куба.",
+        "cube": {"seals": [3, 4, 4, 5, 5, 6], "scale": 0.9, "dual_chance": 0.33, "max_turns": 10, "plays_per_turn": 3, "obstacles": {"rock": 2, "mountain": 1}, "obstacles_per_face": [1, 1], "treasury_share": 0.5}
+      }
     },
     {"layers": 3},
     {

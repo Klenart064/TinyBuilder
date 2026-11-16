@@ -27,6 +27,7 @@ func _initialize() -> void:
 	test_treasury()
 	test_echo()
 	test_forge()
+	test_cube()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -246,13 +247,17 @@ func test_run_flow() -> void:
 		run.end_turn()
 	_check(run.choices.size() == 1 and run.choices[0].has("boss"), "перед боссом — один остров с боссом")
 	run.choose_island(0)
-	for _t in 2:
-		run.end_turn()
+	_check(run.is_cube() and run.cube_roll, "босс 2-го спринта — куб, сначала нужно катить")
+	_check(run.end_turn().is_empty(), "без поворота проверить печать нельзя")
+	var opts: Array = run.roll_options()
+	_check(opts.size() == 4, "катить можно на 4 соседние грани")
+	run.roll(opts[0])
+	_check(run.field.top() == opts[0] and not run.cube_roll and run.plays_left == run.plays_per_turn(), "куб повернулся, можно строить")
 	var lives := run.lives
-	var need := int(run.island["boss"]["need"]) - run.income_total()
+	var miss: int = run.cube_shortfall()
 	r = run.end_turn()
-	_check(r["result"]["boss_missing"] == maxi(0, need), "босс считает весь доход острова (не хватило %d)" % r["result"]["boss_missing"])
-	_check(run.game_over or run.lives <= lives - r["result"]["boss_missing"] + r["result"]["joy"], "нехватка на боссе снимает жизни")
+	_check(r.has("cube") and r["cube"]["miss"] == miss and run.lives == lives - miss, "пустая грань: минус жизнь за каждую недостающую единицу (%d)" % miss)
+	_check(run.cube_roll and run.turn == 2, "следующий ход снова начинается с поворота")
 	var run2 = _play(11)
 	_check(run2.game_over, "забег ботом доходит до конца (остров %d, жизни %d)" % [run2.field_index, run2.lives])
 	var wins := 0
@@ -260,6 +265,68 @@ func test_run_flow() -> void:
 		if _play(100 + s).victory:
 			wins += 1
 	_check(wins >= 4, "жадный бот выигрывает часть забегов (%d/10)" % wins)
+
+
+func test_cube() -> void:
+	var CubeField = LandRun.CubeField
+	var c = CubeField.new()
+	var four := true
+	for i in 54:
+		if c.nbs(i).size() != 4:
+			four = false
+	_check(four, "куб: у каждой клетки 4 соседа (через рёбра тоже)")
+	var cross := 0
+	for j in c.nbs(0):
+		if CubeField.face_of(j) != 0:
+			cross += 1
+	_check(cross == 2, "угловая клетка грани соседствует с двумя другими гранями")
+	var t0: int = c.top()
+	var sides: Dictionary = c.side_faces()
+	var f: int = sides.keys()[0]
+	c.roll_to(f)
+	_check(c.top() == f and c.side_faces().has(t0), "поворот: соседняя грань наверху, бывшая верхняя — сбоку")
+	# Мастерская на ребре видит добычу соседней грани
+	var top: int = c.top()
+	var edge := -1
+	var other := -1
+	for i in range(top * 9, top * 9 + 9):
+		for j in c.nbs(i):
+			if CubeField.face_of(j) != top and edge < 0:
+				edge = i
+				other = j
+	c.content[edge] = "mill"
+	c.content[other] = "field"
+	var sc: Dictionary = c.score(data)
+	_check(int(sc["total"].get("food", 0)) == data.val("mill", "self") + data.val("mill", "per_base"), "Мельница на ребре получает бонус от Поля на соседней грани")
+	_check(int(sc["faces"][CubeField.face_of(other)].get("food", 0)) == data.val("field", "base"), "Поле считается на своей грани")
+	c.seals[top] = {"food": 5, "gold": 1}
+	_check(CubeField.shortfall({"food": 4, "wild": 1}, c.seals[top]) == 1, "печать: джокер закрывает одну недостающую единицу")
+	_check(not c.is_free(other), "на боковой грани строить нельзя")
+	# Бой: снятая печать, итог
+	var run := LandRun.new()
+	run.start(data, 5)
+	var guard := 0
+	while not run.is_cube() and guard < 500:
+		if run.phase == "map":
+			run.choose_island(0)
+		elif run.phase == "market":
+			run.leave_market()
+		run.end_turn()
+		guard += 1
+	run.lives = 99
+	var faces_seen := {}
+	var res := {}
+	guard = 0
+	while run.phase == "island" and guard < 30:
+		LandBot.play_turn(run, true)
+		var r: Dictionary = run.end_turn()
+		if r.has("cube"):
+			faces_seen[r["cube"]["face"]] = true
+		if r.get("field_done", false):
+			res = r["result"]
+		guard += 1
+	_check(res.has("cube") and int(res["cube"]["turns"]) <= int(run.cube_cfg().get("max_turns", 12)), "бой с кубом заканчивается (снято %d из 6 за %d ходов)" % [res.get("cube", {}).get("broken", -1), res.get("cube", {}).get("turns", -1)])
+	_check(run.phase == "market", "после куба — рынок")
 
 
 func test_finish_early() -> void:

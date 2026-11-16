@@ -13,7 +13,16 @@ var facing: Array = []     # int — куда смотрит логово: 0 в�
 
 
 func _init() -> void:
-	for i in N:
+	_alloc(N)
+
+
+func _alloc(n: int) -> void:
+	exists = []
+	content = []
+	prebuilt = []
+	terrain = []
+	facing = []
+	for i in n:
 		exists.append(false)
 		content.append("")
 		prebuilt.append(false)
@@ -73,13 +82,23 @@ static func neighbors(i: int) -> Array:
 	return out
 
 
+## Соседи клетки на этом поле (куб переопределяет: соседство через рёбра).
+func nbs(i: int) -> Array:
+	return neighbors(i)
+
+
+## Сколько клеток в поле (у куба 54).
+func cells_n() -> int:
+	return exists.size()
+
+
 func is_free(i: int) -> bool:
-	return i >= 0 and i < N and exists[i] and content[i] == ""
+	return i >= 0 and i < exists.size() and exists[i] and content[i] == ""
 
 
 func free_cells() -> Array:
 	var out := []
-	for i in N:
+	for i in exists.size():
 		if is_free(i):
 			out.append(i)
 	return out
@@ -87,7 +106,7 @@ func free_cells() -> Array:
 
 func land_cells() -> Array:
 	var out := []
-	for i in N:
+	for i in exists.size():
 		if exists[i]:
 			out.append(i)
 	return out
@@ -100,7 +119,7 @@ func cell_count() -> int:
 ## Связна ли земля, если убрать клетку skip.
 func is_contiguous(skip: int = -1) -> bool:
 	var cells := []
-	for i in N:
+	for i in exists.size():
 		if exists[i] and i != skip:
 			cells.append(i)
 	if cells.is_empty():
@@ -109,7 +128,7 @@ func is_contiguous(skip: int = -1) -> bool:
 	var stack := [cells[0]]
 	while not stack.is_empty():
 		var i: int = stack.pop_back()
-		for j in neighbors(i):
+		for j in nbs(i):
 			if exists[j] and j != skip and not seen.has(j):
 				seen[j] = true
 				stack.append(j)
@@ -122,7 +141,7 @@ func place_building(data, cell: int, id: String) -> Array:
 	prebuilt[cell] = false
 	var razed := []
 	if data.color_of(id) == "force":
-		for j in neighbors(cell):
+		for j in nbs(cell):
 			if exists[j] and data.kind(content[j]) == "threat":
 				content[j] = ""
 				prebuilt[j] = false
@@ -144,7 +163,7 @@ func recipe_progress(data, recipe: String) -> Array:
 	var disabled := disabled_cells(data)
 	var gold := 0
 	var colors := {}
-	for j in neighbors(anvil):
+	for j in nbs(anvil):
 		if not exists[j] or not data.is_building(content[j]) or j in disabled:
 			continue
 		var c: String = data.color_of(content[j])
@@ -192,7 +211,7 @@ func echo(data, cell: int, level: int) -> Array:
 			continue
 		if level == 1 and d >= 1:
 			continue
-		for j in neighbors(c):
+		for j in nbs(c):
 			if dist.has(j) or not exists[j] or not data.is_building(content[j]):
 				continue
 			if level >= 2 and not linked(data, c, j):
@@ -227,7 +246,7 @@ func level(data, cell: int) -> int:
 		var td: Dictionary = data.terrain[terrain[cell]]
 		if int(td.get("bonus", 0)) > 0 and (td["color"] == col or td["color"] == "any"):
 			n += 1
-	for j in neighbors(cell):
+	for j in nbs(cell):
 		if not exists[j]:
 			continue
 		var nid: String = content[j]
@@ -274,7 +293,7 @@ static func cascade_total(steps: Array) -> Dictionary:
 ## Военные здания (цвет force) логово не выключает.
 func disabled_cells(data) -> Array:
 	var out := []
-	for i in N:
+	for i in exists.size():
 		if exists[i] and data.kind(content[i]) == "threat":
 			var j := step(i, facing[i])
 			if j >= 0 and exists[j] and data.is_building(content[j]) and data.color_of(content[j]) != "force" and not (j in out):
@@ -289,12 +308,12 @@ func score(data) -> Dictionary:
 	var rules: Dictionary = data.rules
 	var disabled := disabled_cells(data)
 	var cells := []
-	for i in N:
+	for i in exists.size():
 		cells.append({"yield": {}, "notes": []})
 	var links := []
 	var discontent := 0
 	var joy := 0
-	for i in N:
+	for i in exists.size():
 		if not exists[i]:
 			continue
 		var id: String = content[i]
@@ -316,7 +335,7 @@ func score(data) -> Dictionary:
 				if td["color"] == col or td["color"] == "any":
 					_add(cells[i], col, int(td["bonus"]), td["name"])
 		var market_colors := {}
-		for j in neighbors(i):
+		for j in nbs(i):
 			if not exists[j]:
 				continue
 			var nid: String = content[j]
@@ -343,7 +362,7 @@ func score(data) -> Dictionary:
 				discontent += int(rules["conflict"])
 				links.append({"a": i, "b": j, "type": "conflict", "res": ""})
 	var total: Dictionary = data.zero_res()
-	for i in N:
+	for i in exists.size():
 		for r in cells[i]["yield"]:
 			total[r] = int(total.get(r, 0)) + int(cells[i]["yield"][r])
 	for r in total:
