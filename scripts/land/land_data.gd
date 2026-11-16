@@ -33,6 +33,17 @@ func load_all(dir: String = "res://data/land") -> bool:
 			up["upgraded"] = true
 			up["base_id"] = id
 			objects[id + "+"] = up
+	# Эхо: «field*1» … «field*3» — та же карта с навыком Эхо (повторно запускает здания при постройке)
+	for id in objects.keys():
+		var o: Dictionary = objects[id]
+		if o.get("role", "") in ["base", "workshop"] and not o.has("base_id"):
+			for n in [1, 2, 3]:
+				var e: Dictionary = o.duplicate(true)
+				e.erase("upgrade")
+				e["name"] = "%s · Эхо %s" % [o["name"], ["I", "II", "III"][n - 1]]
+				e["echo"] = n
+				e["base_id"] = id
+				objects["%s*%d" % [id, n]] = e
 	run = run_file
 	rules = run_file["rules"]
 	colors = []
@@ -116,6 +127,21 @@ func can_upgrade(id: String) -> bool:
 	return objects.has(id + "+")
 
 
+## Уровень Эхо карты: 0 — нет.
+func echo_level(id: String) -> int:
+	return int(objects.get(id, {}).get("echo", 0))
+
+
+## Во что карта превращается следующим шагом Эхо ("" — нельзя). Эхо III — только редким предложением.
+func echo_next(id: String) -> String:
+	var lv := echo_level(id)
+	if lv == 0:
+		return id + "*1" if objects.has(id + "*1") else ""
+	if lv == 1:
+		return base_id(id) + "*2"
+	return ""
+
+
 func obj_name(id: String) -> String:
 	return objects.get(id, {}).get("name", id)
 
@@ -134,7 +160,7 @@ func pair_partners(id: String) -> Array:
 	if want == "":
 		return out
 	for other in objects:
-		if role(other) == want and color_of(other) == color_of(id) and not is_upgraded(other):
+		if role(other) == want and color_of(other) == color_of(id) and base_id(other) == other:
 			out.append(other)
 	return out
 

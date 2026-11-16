@@ -53,8 +53,8 @@ func _run() -> void:
 	f.content[1] = "lake"
 	f.terrain[8] = "fertile_force"
 	f.content[7] = "lair"
-	f.facing[7] = 2
-	f.content[2] = "smithy"
+	f.facing[7] = 0
+	f.content[2] = "field"
 	f.terrain[13] = "swamp"
 	r.event_type = "swap"
 	r.island["danger"] = false
@@ -72,17 +72,17 @@ func _run() -> void:
 	await _frames(5)
 	_save("land_rules.png")
 	main._toggle_rules()
-	# Каскад: превью и анимация
-	r.hand = ["mill", "field", "mine", "house"]
+	# Эхо: превью и анимация; уровни мастерских видны на Мельнице
+	r.hand = ["mill*2", "field", "mine", "house"]
 	r.plays_left = 2
 	main.selected = 0
 	main.hover = 4
 	main._full_refresh()
 	await _frames(8)
-	_save("land_cascade_preview.png")
+	_save("land_echo_preview.png")
 	main._try_place(4)
 	await _seconds(0.5)
-	_save("land_cascade_anim.png")
+	_save("land_echo_anim.png")
 	await _seconds(1.0)
 	# Итог острова
 	main.selected = -1
@@ -106,10 +106,19 @@ func _run() -> void:
 	main._show_market()
 	await _frames(8)
 	_save("land_market.png")
+	r.sprint = 1
+	r.market["echo3"] = "mill"
+	main.market_tab = 0
+	main._show_market()
+	await _frames(8)
+	_save("land_market_echo3.png")
+	r.stock = {"food": 30, "gold": 20, "force": 20, "wild": 5}
+	r.echo("mill")
 	main.market_tab = 1
 	main._show_market()
 	await _frames(8)
 	_save("land_market_deck.png")
+	r.sprint = 0
 	r.upgrade("mill")
 	r.upgrade("field")
 	main._show_market()

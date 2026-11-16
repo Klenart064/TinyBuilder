@@ -19,7 +19,7 @@ static func play_turn(run, smart: bool = true) -> void:
 			for c in free:
 				var f = run.field.clone()
 				f.place_building(run.data, c, run.hand[h])
-				var gain: Dictionary = f.cascade_total(f.cascade(run.data, c))
+				var gain: Dictionary = f.cascade_total(f.echo(run.data, c, run.data.echo_level(run.hand[h])))
 				var v := value(run, f, gain)
 				if v > best_v + 0.001:
 					best_v = v
@@ -37,14 +37,11 @@ static func value(run, f, gain: Dictionary) -> float:
 	var v := 0.0
 	for r in gain:
 		v += float(gain[r]) * (1.3 if r == "wild" else 1.0)
-	var pot := 0.0
 	for r in sc["total"]:
-		pot += float(sc["total"][r])
-	var left := float(int(run.data.run["turns_per_field"]) - run.turn) * 2.0 + float(run.plays_left)
-	v += pot * clampf(left * 0.12, 0.0, 0.6)
-	var have := {}
-	for r in run.earned:
-		have[r] = int(run.earned[r]) + int(gain.get(r, 0))
+		v += float(sc["total"][r]) * (1.3 if r == "wild" else 1.0)
+	var have: Dictionary = sc["total"].duplicate()
+	for r in run.echo_gain:
+		have[r] = int(have.get(r, 0)) + int(run.echo_gain[r]) + int(gain.get(r, 0))
 	if not run.task.is_empty():
 		var short := 0
 		for r in run.task:
@@ -55,7 +52,7 @@ static func value(run, f, gain: Dictionary) -> float:
 		v += float(rew) * 1.3 if short == 0 else -0.3 * float(short)
 	if run.is_boss():
 		var miss := maxi(0, int(run.island["boss"]["need"]) - run.sum_res(have))
-		v -= 1.5 * float(miss)
+		v -= 3.5 * float(miss)
 	v -= 3.5 * float(sc["discontent"])
 	v += 3.0 * float(mini(int(sc.get("joy", 0)), int(run.data.run["lives"]) - run.lives))
 	return v
@@ -94,10 +91,28 @@ static func shop(run, smart: bool = true) -> void:
 	run.take_contract()
 	while run.lives <= int(run.data.run["lives"]) - 4 and run.heal():
 		pass
+	run.buy_echo3()
 	var changed := true
 	while changed:
 		changed = false
 		var cards: Array = run.all_cards()
+		cards.sort_custom(func(a, b): return _prio(run, a) > _prio(run, b))
+		for id in cards:
+			if run.data.echo_level(id) == 1 and run.echo(id):
+				changed = true
+				break
+		if changed:
+			continue
+		var n_echo := 0
+		for id in cards:
+			if run.data.echo_level(id) > 0:
+				n_echo += 1
+		for id in cards:
+			if n_echo < 4 and run.data.role(id) == "workshop" and run.data.echo_level(id) == 0 and not run.data.is_upgraded(id) and run.echo(id):
+				changed = true
+				break
+		if changed:
+			continue
 		cards.sort_custom(func(a, b): return _prio(run, a) > _prio(run, b))
 		for id in cards:
 			if run.data.can_upgrade(id) and run.upgrade(id):

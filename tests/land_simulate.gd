@@ -27,6 +27,7 @@ func _initialize() -> void:
 		var cnt_by_sprint := {}
 		var boss_total := {}
 		var upgrades := 0
+		var echoes := [0, 0, 0, 0]
 		var deck_size := 0
 		var reached := {}
 		for s in runs:
@@ -74,6 +75,7 @@ func _initialize() -> void:
 			for id in run.all_cards():
 				if run.data.is_upgraded(id):
 					upgrades += 1
+				echoes[run.data.echo_level(id)] += 1
 			deck_size += run.all_cards().size()
 			reached[run.field_index] = reached.get(run.field_index, 0) + 1
 		print("\n=== Бот: %s, забегов %d ===" % ["жадный" if smart else "случайный", runs])
@@ -90,7 +92,7 @@ func _initialize() -> void:
 		print("Потери жизней за остров: недовольство %.2f; за забег боссы %.2f; таверна +%.2f за остров" % [
 			float(loss["discontent"]) / fields, float(loss["boss"]) / runs, float(joy) / fields])
 		print("Задания: %d/%d, контракты: %d/%d" % [tasks[0], tasks[1], contracts[0], contracts[1]])
-		print("В конце: колода %.1f карт, улучшено %.1f" % [float(deck_size) / runs, float(upgrades) / runs])
+		print("В конце: колода %.1f карт, улучшено %.1f, Эхо I/II/III: %.1f / %.1f / %.1f" % [float(deck_size) / runs, float(upgrades) / runs, float(echoes[1]) / runs, float(echoes[2]) / runs, float(echoes[3]) / runs])
 		var keys := reached.keys()
 		keys.sort()
 		line = "Дошли до острова: "

@@ -131,22 +131,70 @@ func place_building(data, cell: int, id: String) -> Array:
 	return razed
 
 
-## Каскад: доход в момент постройки. Сначала срабатывает новое здание, потом по очереди
-## каждое соседнее здание — ещё раз, со своим текущим доходом (после постройки).
-## Возвращает [{"cell", "yield": {res: n}}] — только сработавшие с ненулевым доходом.
-func cascade(data, cell: int) -> Array:
+## Связка между соседними зданиями (для Эхо II/III): добыча — мастерская своего цвета,
+## две мастерские своего цвета, Домик или Рынок — с любым зданием.
+func linked(data, a: int, b: int) -> bool:
+	var ia: String = content[a]
+	var ib: String = content[b]
+	if not (data.is_building(ia) and data.is_building(ib)):
+		return false
+	for pair in [[ia, ib], [ib, ia]]:
+		var bid: String = data.base_id(pair[0])
+		if bid == "house" or bid == "market":
+			return true
+	var ra: String = data.role(ia)
+	var rb: String = data.role(ib)
+	if data.color_of(ia) != data.color_of(ib):
+		return false
+	return (ra == "workshop" and rb in ["base", "workshop"]) or (rb == "workshop" and ra == "base")
+
+
+## Эхо: при постройке на cell другие здания срабатывают ещё раз со своим текущим доходом.
+## level 1 — соседи; 2 — волна на 2 шага по связкам; 3 — вся связанная сеть.
+## Возвращает [{"cell", "yield", "wave"}] в порядке волны (само построенное здание не входит).
+func echo(data, cell: int, level: int) -> Array:
+	if level <= 0:
+		return []
 	var sc: Dictionary = score(data)
-	var out := []
-	for i in [cell] + neighbors(cell):
-		if i != cell and not (exists[i] and data.is_building(content[i])):
+	var dist := {cell: 0}
+	var queue := [cell]
+	var order := []
+	while not queue.is_empty():
+		var c: int = queue.pop_front()
+		var d: int = dist[c]
+		if level == 2 and d >= 2:
 			continue
-		var y: Dictionary = sc["cells"][i]["yield"]
+		if level == 1 and d >= 1:
+			continue
+		for j in neighbors(c):
+			if dist.has(j) or not exists[j] or not data.is_building(content[j]):
+				continue
+			if level >= 2 and not linked(data, c, j):
+				continue
+			dist[j] = d + 1
+			queue.append(j)
+			order.append(j)
+	var out := []
+	for j in order:
+		var y: Dictionary = sc["cells"][j]["yield"]
 		var sum := 0
 		for r in y:
 			sum += int(y[r])
 		if sum > 0:
-			out.append({"cell": i, "yield": y.duplicate()})
+			out.append({"cell": j, "yield": y.duplicate(), "wave": dist[j]})
 	return out
+
+
+## Уровень мастерской на острове: сколько рядом добычи своего цвета (0–4). Только для вида.
+func workshop_level(data, cell: int) -> int:
+	var id: String = content[cell]
+	if data.role(id) != "workshop":
+		return 0
+	var n := 0
+	for j in neighbors(cell):
+		if exists[j] and data.role(content[j]) == "base" and data.color_of(content[j]) == data.color_of(id):
+			n += 1
+	return mini(n, 4)
 
 
 static func cascade_total(steps: Array) -> Dictionary:

@@ -20,6 +20,7 @@ const LAND_COLOR := Color("#c58cff")
 const DANGER_COLOR := Color("#ff5a3c")
 const GROW_COLOR := Color("#7dffa0")
 const GREY_COLOR := Color("#b9b2a6")
+const ECHO_COLOR := Color("#5fe3ff")
 
 var data
 var run
@@ -331,6 +332,7 @@ func _rebuild_board() -> void:
 		var id: String = f.content[i]
 		if id != "":
 			var node := _make_object(id, 1.0, f.facing[i])
+			Models.add_level(node, id, f.workshop_level(data, i))
 			node.position = p
 			board_root.add_child(node)
 			objs[i] = node
@@ -356,6 +358,11 @@ func _rebuild_board() -> void:
 		var holder := Node3D.new()
 		holder.position = cell_pos(i) + Vector3(0, float(data.objects[f.content[i]].get("height", 0.9)) + 0.3, 0)
 		board_root.add_child(holder)
+		var lv: int = f.workshop_level(data, i)
+		if lv > 0:
+			var lb := _text_badge("ур. %d" % lv, 26, Color("#f2c94c"))
+			lb.position = Vector3(0, 0.32, 0)
+			holder.add_child(lb)
 		if i in sc["disabled"]:
 			holder.add_child(_text_badge("выкл", 30, Color("#c0c0c0")))
 			_dim(objs[i])
@@ -365,6 +372,7 @@ func _rebuild_board() -> void:
 				holder.add_child(_text_badge("0", 30, Color("#9aa4ae")))
 			else:
 				holder.add_child(_make_badge(y, 30, Color.WHITE, 5))
+
 
 
 func _terrain_label(i: int) -> void:
@@ -540,14 +548,20 @@ func _update_hover() -> void:
 	var g = f.clone()
 	var razed: Array = g.place_building(data, hover, card)
 	var after: Dictionary = g.score(data)
-	# Каскад: что даст сама постройка и какие соседи сработают ещё раз
-	for st in g.cascade(data, hover):
-		var own: bool = st["cell"] == hover
-		var badge := _make_badge(st["yield"], 40 if own else 30, Color(1, 0.95, 0.6) if own else PAIR_COLOR, 8)
-		badge.position = cell_pos(st["cell"]) + Vector3(0, 1.8 if own else 1.45, 0)
-		hover_root.add_child(badge)
-		if not own:
-			_frame(st["cell"], PAIR_COLOR, hover_root, true, 0.06)
+	var d := {}
+	for r in data.resources:
+		var v := int(after["total"].get(r, 0)) - int(before["total"].get(r, 0))
+		if v != 0:
+			d[r] = v
+	var badge := _make_badge(d, 40, Color(1, 0.95, 0.6), 8)
+	badge.position = cell_pos(hover) + Vector3(0, 1.8, 0)
+	hover_root.add_child(badge)
+	# Эхо: какие здания сработают ещё раз (голубая рамка и их цифры)
+	for st in g.echo(data, hover, data.echo_level(card)):
+		var eb := _make_badge(st["yield"], 30, ECHO_COLOR, 8)
+		eb.position = cell_pos(st["cell"]) + Vector3(0, 1.45, 0)
+		hover_root.add_child(eb)
+		_frame(st["cell"], ECHO_COLOR, hover_root, true, 0.06)
 	var dd := int(after["discontent"]) - int(before["discontent"])
 	if dd > 0:
 		var hb := _heart_badge(-dd, 36)
@@ -1132,10 +1146,10 @@ func _refresh_info() -> void:
 	if not run.task.is_empty():
 		var ok: bool = run.task_done(sc)
 		var tb := _section(info_box, "Задание: %s" % _plain_fmt(run.island.get("task_reward", {})), Color("#6fcf97") if ok else Color("#f2c94c"), 18)
-		tb.get_parent().tooltip_text = "Получите каскадами на этом острове столько ресурса — получите награду в казну. Не выполнили — ничего не теряете."
+		tb.get_parent().tooltip_text = "Произведите на этом острове столько ресурса — получите награду в казну. Не выполнили — ничего не теряете."
 		tb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 		for r in run.task:
-			tb.add_child(_progress_row(r, int(run.earned.get(r, 0)), int(run.task[r])))
+			tb.add_child(_progress_row(r, int(run.income(sc).get(r, 0)), int(run.task[r])))
 		if ok:
 			tb.add_child(_rich_line("[color=#6fcf97]Готово! Можно забрать остров (Enter)[/color]", 14))
 
@@ -1143,9 +1157,9 @@ func _refresh_info() -> void:
 	if run.is_boss():
 		var b: Dictionary = run.island["boss"]
 		var bb := _section(info_box, "Босс: %s" % b["name"], Color("#eb5757"), 19)
-		bb.get_parent().tooltip_text = "Нужно получить каскадами на этом острове столько всего (любые ресурсы и джокеры). Каждая недостающая единица — минус жизнь."
+		bb.get_parent().tooltip_text = "Нужно произвести на этом острове столько всего (любые ресурсы и джокеры). Каждая недостающая единица — минус жизнь."
 		bb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-		bb.add_child(_progress_row("wild", run.earned_total(), int(b["need"]), " всего"))
+		bb.add_child(_progress_row("wild", run.sum_res(run.income(sc)), int(b["need"]), " всего"))
 	else:
 		var nb: Dictionary = run.next_boss()
 		if not nb.is_empty():
@@ -1155,7 +1169,7 @@ func _refresh_info() -> void:
 	# Контракт с рынка
 	if not run.contract.is_empty() and int(run.contract["sprint"]) == run.sprint:
 		var c: Dictionary = run.contract
-		var have := int(c["progress"]) + int(run.earned.get(c["res"], 0))
+		var have := int(c["progress"]) + int(run.income(sc).get(c["res"], 0))
 		var cb := _section(info_box, "Контракт спринта · %s" % _plain_fmt(c["reward"]), Color("#56ccf2"), 16)
 		cb.get_parent().tooltip_text = "Взят на рынке: произвести за этот спринт. Награда — на следующем рынке."
 		cb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
@@ -1182,7 +1196,7 @@ func _refresh_treasury() -> void:
 		chip.add_child(_icon_rect(_icon(r), 34))
 		var shown: Dictionary = _treasury_shown if _treasury_shown != null else run.stock
 		chip.add_child(_label(str(int(shown.get(r, 0))), 28, Color.WHITE))
-		var inc := int(run.earned.get(r, 0))
+		var inc := int(run.income(sc).get(r, 0))
 		if inc > 0:
 			chip.add_child(_label("+%d" % inc, 18, Color("#6fcf97")))
 		treasury_box.add_child(chip)
@@ -1224,10 +1238,11 @@ func _refresh_side() -> void:
 	var rb := _section(side_box, "Правила", Color("#8a96a3"), 16)
 	var force := _img("force", 16)
 	var t := ""
-	t += "[color=#ffd866][b]Каскад[/b][/color]: доход приходит в момент постройки. Новое здание срабатывает, и каждое соседнее здание срабатывает ещё раз со своим текущим доходом.\n"
+	t += "[color=#5fe3ff][b]Эхо[/b][/color] — навык карты с рынка: при постройке здания вокруг срабатывают ещё раз, доход сразу в казну. I — соседи, II — волна на 2 шага по связкам, III — вся связанная сеть.\n"
+	t += "[color=#f2c94c]Уровень мастерской[/color] = сколько рядом добычи её цвета (пристройки на модели).\n"
 	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
 	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
-	t += "[color=#eb5757]Босс[/color]: на его острове нужно получить N всего, иначе −1%s за единицу.\n" % _heart_img(14)
+	t += "[color=#eb5757]Босс[/color]: на его острове нужно произвести N всего, иначе −1%s за единицу.\n" % _heart_img(14)
 	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
 	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран[/color]"
@@ -1286,7 +1301,7 @@ func _card_button(i: int, id: String) -> Button:
 	pic.custom_minimum_size = Vector2(0, 104)
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(pic)
-	var title := _label(data.obj_name(id), 20, Color("#f2c94c") if data.is_upgraded(id) else Color.WHITE)
+	var title := _label(_card_title(id), 20, _title_color(id))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
 	var t := _card_rules(id)
@@ -1296,6 +1311,28 @@ func _card_button(i: int, id: String) -> Button:
 
 ## Короткое правило карты иконками (числа — из data/land/cards.json, у улучшенных свои).
 func _card_rules(id: String, small: bool = false) -> String:
+	var base_rules := _card_rules_plain(id, small)
+	var lv: int = data.echo_level(id)
+	if lv == 0:
+		return base_rules
+	return base_rules + "\n[color=#5fe3ff][b]Эхо %s[/b][/color]" % ["I", "II", "III"][lv - 1]
+
+
+func _echo_desc(lv: int) -> String:
+	return ["соседи срабатывают ещё раз", "волна на 2 шага по связкам", "вся связанная сеть срабатывает"][lv - 1]
+
+
+func _card_title(id: String) -> String:
+	return data.obj_name(data.base_id(id)) if data.echo_level(id) > 0 else data.obj_name(id)
+
+
+func _title_color(id: String) -> Color:
+	if data.echo_level(id) > 0:
+		return ECHO_COLOR
+	return Color("#f2c94c") if data.is_upgraded(id) else Color.WHITE
+
+
+func _card_rules_plain(id: String, small: bool = false) -> String:
 	var col: String = data.color_of(id)
 	var big := 18 if small else 22
 	var ic := 20 if small else 26
@@ -1370,7 +1407,7 @@ func _refresh_hint() -> void:
 	var s := ""
 	var f = run.field
 	if busy and _treasury_shown != null:
-		s = "[color=#ffd866]Каскад: здания срабатывают…[/color]"
+		s = "[color=#5fe3ff][b]Эхо ×%d![/b] Здания срабатывают ещё раз…[/color]" % _echo_count
 	elif busy:
 		s = "[color=#c58cff]Ходит земля…[/color]"
 	elif run.plays_left <= 0:
@@ -1381,10 +1418,13 @@ func _refresh_hint() -> void:
 		var g = f.clone()
 		var razed: Array = g.place_building(data, hover, id)
 		var after: Dictionary = g.score(data)
-		var steps: Array = g.cascade(data, hover)
-		s = "Сразу в казну: " + _fmt(g.cascade_total(steps), true)
-		if steps.size() > 1:
-			s += "   [color=#ffd866](сработают ещё %d %s)[/color]" % [steps.size() - 1, _plural(steps.size() - 1, "сосед", "соседа", "соседей")]
+		var d := {}
+		for r in data.resources:
+			d[r] = int(after["total"].get(r, 0)) - int(before["total"].get(r, 0))
+		s = _fmt(d, true)
+		var steps: Array = g.echo(data, hover, data.echo_level(id))
+		if not steps.is_empty():
+			s += "   [color=#5fe3ff]Эхо: сработают ещё %d → сразу %s[/color]" % [steps.size(), _fmt(g.cascade_total(steps), true)]
 		var dd := int(after["discontent"]) - int(before["discontent"])
 		if dd > 0:
 			s += "   [color=#ff8080]−%d[/color]%s" % [dd, _heart_img(20)]
@@ -1398,7 +1438,10 @@ func _refresh_hint() -> void:
 		if hover in run.score()["disabled"]:
 			s += "[color=#c0c0c0]выключено Логовом[/color]"
 		else:
-			s += "при срабатывании " + _fmt(cellinfo["yield"], true)
+			s += _fmt(cellinfo["yield"], true)
+			var lv: int = f.workshop_level(data, hover)
+			if lv > 0:
+				s += "   [color=#f2c94c]уровень %d (добычи рядом: %d)[/color]" % [lv, lv]
 	else:
 		s = "[color=#a9b4c0]Построек в этом ходу: %d[/color]" % run.plays_left
 	hint_text.text = "[center]%s[/center]" % s
@@ -1465,29 +1508,45 @@ func _try_place(cell: int) -> void:
 	if selected < 0 or not run.can_place(selected, cell):
 		return
 	var shown: Dictionary = run.stock.duplicate()
+	var before: Dictionary = run.score()
 	var r: Dictionary = run.place(selected, cell)
 	if not r["ok"]:
 		return
 	selected = -1
-	_treasury_shown = shown
+	_treasury_shown = shown if not r["echo"].is_empty() else null
 	_full_refresh()
+	var after: Dictionary = run.score()
+	var d := {}
+	for res in data.resources:
+		var v := int(after["total"].get(res, 0)) - int(before["total"].get(res, 0))
+		if v != 0:
+			d[res] = v
+	_float_badge(cell, d)
+	for l in after["links"]:
+		if (l["a"] == cell or l["b"] == cell) and l["type"] == "pair":
+			_flash_tile(l["a"] if l["b"] == cell else l["b"], PAIR_COLOR)
 	if not r["razed"].is_empty():
 		_show_toast("[center][b]Логово снесено![/b][/center]")
-	await _play_cascade(r["cascade"])
-	_full_refresh()
+	if not r["echo"].is_empty():
+		await get_tree().create_timer(0.3).timeout
+		await _play_cascade(r["echo"])
+		_full_refresh()
 
 
-## Каскад: здания срабатывают по очереди — вспышка, подпрыгивание, всплывающие цифры, казна растёт.
+## Эхо: здания срабатывают по очереди — вспышка, подпрыгивание, всплывающие цифры, казна растёт.
 var _treasury_shown = null
 const CASCADE_STEP := 0.38
 
+var _echo_count := 0
+
 func _play_cascade(steps: Array) -> void:
+	_echo_count = steps.size()
 	busy = true
 	_refresh_ui()
 	for k in steps.size():
 		var st: Dictionary = steps[k]
 		var c: int = st["cell"]
-		_flash_tile(c, PAIR_COLOR if k > 0 else Color.WHITE)
+		_flash_tile(c, ECHO_COLOR)
 		var n: Node3D = objs[c] if c < objs.size() else null
 		if n != null:
 			var t := create_tween()
@@ -1498,8 +1557,6 @@ func _play_cascade(steps: Array) -> void:
 			for res in st["yield"]:
 				_treasury_shown[res] = int(_treasury_shown.get(res, 0)) + int(st["yield"][res])
 			_refresh_treasury()
-		if k == 0 and steps.size() >= 3:
-			_show_toast("[center][b][color=#ffd866]Каскад ×%d![/color][/b][/center]" % steps.size())
 		await get_tree().create_timer(CASCADE_STEP).timeout
 	_treasury_shown = null
 	busy = false
@@ -1571,7 +1628,9 @@ func _show_field_result(res: Dictionary) -> void:
 	overlay_mode = "result"
 	var isl: Dictionary = res["island"]
 	var s := "[center][b][font_size=24]Остров %d пройден[/font_size][/b][/center]\n\n" % run.field_index
-	s += "Получено каскадами за остров: %s\n" % _fmt(res["prod"], true)
+	s += "Доход острова в казну: %s\n" % _fmt(res["prod"], true)
+	if run.sum_res(res.get("echo", {})) > 0:
+		s += "[color=#5fe3ff]Из них от Эхо:[/color] %s\n" % _fmt(res["echo"], true)
 	if not res["reward"].is_empty():
 		s += "Награда за остров%s: %s\n" % [" (опасный!)" if isl.get("danger", false) else "", _fmt(res["reward"], true)]
 	if not res["task"].is_empty():
@@ -1771,7 +1830,7 @@ func _refresh_map_detail() -> void:
 	h.add_child(_mini_field(isl["field"], 24))
 	var t := ""
 	if isl.has("boss"):
-		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПолучите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], int(isl["boss"]["need"]), _heart_img()]
+		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПроизведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], int(isl["boss"]["need"]), _heart_img()]
 	else:
 		var ev: Dictionary = data.events.get(isl["event"], {"name": "Спокойная земля", "desc": "Земля на этом острове не двигается."})
 		t += "[font_size=20][b][color=%s]%s[/color][/b][/font_size]%s\n[color=#c9d1d9]%s[/color]\n" % [_island_accent(isl).to_html(false), ev["name"], "  [color=#ff8a70]опасно[/color]" if isl.get("danger", false) else "", ev.get("desc", "")]
@@ -1903,7 +1962,7 @@ func _market_shop() -> void:
 	row2.add_theme_constant_override("separation", 14)
 	overlay_body.add_child(row2)
 	# Лечение
-	var hb := _box_panel(Color("#eb5757"), 300)
+	var hb := _box_panel(Color("#eb5757"), 240)
 	var hv: VBoxContainer = hb.get_child(0)
 	hv.add_child(_rich_line("[b]Лекарь[/b]: +%d%s" % [int(run.market_cfg()["heal_lives"]), _heart_img(18)], 17))
 	var hprice := {"any": int(run.market_cfg()["heal_cost"])}
@@ -1913,7 +1972,7 @@ func _market_shop() -> void:
 	row2.add_child(hb)
 	# Контракт
 	var c: Dictionary = run.market["contract"]
-	var cbx := _box_panel(Color("#56ccf2"), 420)
+	var cbx := _box_panel(Color("#56ccf2"), 380)
 	var cv: VBoxContainer = cbx.get_child(0)
 	cv.add_child(_rich_line("[b]Контракт на следующий спринт[/b]: произвести за спринт %d%s → %s" % [int(c["amount"]), _img(c["res"], 20), _fmt(c["reward"], true)], 16))
 	var taken: bool = run.market.get("contract_taken", false)
@@ -1921,10 +1980,21 @@ func _market_shop() -> void:
 	cb.pressed.connect(func(): if run.take_contract(): _show_market())
 	cv.add_child(cb)
 	row2.add_child(cbx)
+	# Редкое Эхо III
+	var e3: String = run.market.get("echo3", "")
+	if e3 != "":
+		var ebx := _box_panel(ECHO_COLOR, 260)
+		var ev: VBoxContainer = ebx.get_child(0)
+		ev.add_child(_rich_line("[b][color=#5fe3ff]Редкое: Эхо III[/color][/b] для карты [b]%s[/b] — вся связанная сеть срабатывает" % data.obj_name(e3), 15))
+		var ep: Dictionary = run.echo_price(e3, 3)
+		var b3 := _rich_button("Купить за " + _price_text(ep), not run.can_afford(ep))
+		b3.pressed.connect(func(): if run.buy_echo3(): _show_market())
+		ev.add_child(b3)
+		row2.add_child(ebx)
 
 
 func _market_deck() -> void:
-	overlay_body.add_child(_rich_line("[center][color=#a9b4c0]Улучшение меняет одну карту на сильную (+), платится цветом карты. Удаление убирает одну карту.[/color][/center]", 14))
+	overlay_body.add_child(_rich_line("[center][color=#a9b4c0]Карта получает либо [color=#f2c94c]+1[/color] к доходу, либо [color=#5fe3ff]Эхо I[/color] (при постройке соседи срабатывают ещё раз). Эхо II — со 2-го рынка. Платится цветом карты.[/color][/center]", 14))
 	var grid := GridContainer.new()
 	grid.columns = 7
 	grid.add_theme_constant_override("h_separation", 8)
@@ -1939,10 +2009,18 @@ func _market_deck() -> void:
 		var v: VBoxContainer = tile.get_child(0)
 		if data.can_upgrade(id):
 			var up_price: Dictionary = run.upgrade_price(id)
-			v.add_child(_rich_line("[center][color=#f2c94c]→[/color] %s[/center]" % _card_rules(id + "+", true), 12))
-			var ub := _rich_button("Улучшить " + _price_text(up_price, true), not run.can_afford(up_price), 12)
+			var ub := _rich_button("+1: " + _price_text(up_price, true), not run.can_afford(up_price), 12)
+			ub.tooltip_text = "Станет: " + data.obj_name(id + "+")
 			ub.pressed.connect(func(): if run.upgrade(id): _show_market())
 			v.add_child(ub)
+		var nx: String = run.echo_next(id)
+		if nx != "":
+			var lv: int = data.echo_level(nx)
+			var ep: Dictionary = run.echo_price(id, lv)
+			var eb := _rich_button("[color=#5fe3ff]Эхо %s[/color]: %s" % [["I", "II", "III"][lv - 1], _price_text(ep, true)], not run.can_afford(ep), 12)
+			eb.tooltip_text = "Эхо %s: при постройке %s." % [["I", "II", "III"][lv - 1], _echo_desc(lv)]
+			eb.pressed.connect(func(): if run.echo(id): _show_market())
+			v.add_child(eb)
 		var rb := _rich_button("Убрать " + _price_text(rprice, true), not run.can_afford(rprice) or run.all_cards().size() <= int(data.run["hand_size"]) + 2, 12)
 		rb.pressed.connect(func(): if run.remove(id): _show_market())
 		v.add_child(rb)
@@ -1977,7 +2055,7 @@ func _deck_counts() -> Dictionary:
 ## Маленькая карта: картинка, имя, (количество), правило.
 func _mini_card(id: String, count: int, width: int, pic_h: int, compact: bool = false) -> PanelContainer:
 	var up: bool = data.is_upgraded(id)
-	var p := _box_panel(Color("#f2c94c") if up else Color(_res_color(data.color_of(id))), width)
+	var p := _box_panel(ECHO_COLOR if data.echo_level(id) > 0 else (Color("#f2c94c") if up else Color(_res_color(data.color_of(id)))), width)
 	var v: VBoxContainer = p.get_child(0)
 	var pic := TextureRect.new()
 	pic.texture = _card_tex(id)
@@ -1986,8 +2064,8 @@ func _mini_card(id: String, count: int, width: int, pic_h: int, compact: bool = 
 	pic.custom_minimum_size = Vector2(0, pic_h)
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(pic)
-	var name: String = data.obj_name(id) + ("  ×%d" % count if count > 1 else "")
-	var title := _label(name, 15 if compact else 18, Color("#f2c94c") if up else Color.WHITE)
+	var name: String = _card_title(id) + ("  ×%d" % count if count > 1 else "")
+	var title := _label(name, 15 if compact else 18, _title_color(id))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
 	v.add_child(_rich_line("[center]%s[/center]" % _card_rules(id, compact), 12 if compact else 14))

@@ -47,8 +47,8 @@ var market: Dictionary = {}
 var game_over := false
 var victory := false
 
-## Доход острова, уже полученный каскадами (лежит в казне)
-var earned: Dictionary = {}
+## Доход острова от Эхо (сверх обычного, уже лежит в казне)
+var echo_gain: Dictionary = {}
 
 var _history: Array = []
 
@@ -212,7 +212,7 @@ func choose_island(i: int) -> void:
 	task = island["task"]
 	deck.discard(hand)
 	hand = deck.draw(int(data.run["hand_size"]))
-	earned = data.zero_res()
+	echo_gain = data.zero_res()
 	turn = 1
 	plays_left = int(data.run["plays_per_turn"])
 	_history.clear()
@@ -242,18 +242,18 @@ func can_place(hand_idx: int, cell: int) -> bool:
 func place(hand_idx: int, cell: int) -> Dictionary:
 	if not can_place(hand_idx, cell):
 		return {"ok": false, "razed": []}
-	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "earned": earned.duplicate()})
+	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "echo": echo_gain.duplicate()})
 	var id: String = hand[hand_idx]
 	hand.remove_at(hand_idx)
 	var razed: Array = field.place_building(data, cell, id)
 	plays_left -= 1
 	deck.discard([id])
-	var steps: Array = field.cascade(data, cell)
+	var steps: Array = field.echo(data, cell, data.echo_level(id))
 	var gain: Dictionary = LandField.cascade_total(steps)
 	_add_stock(gain)
 	for r in gain:
-		earned[r] = int(earned.get(r, 0)) + int(gain[r])
-	return {"ok": true, "razed": razed, "cascade": steps, "gain": gain}
+		echo_gain[r] = int(echo_gain.get(r, 0)) + int(gain[r])
+	return {"ok": true, "razed": razed, "echo": steps, "gain": gain}
 
 
 func can_undo() -> bool:
@@ -273,7 +273,7 @@ func undo() -> bool:
 	hand = h["hand"]
 	plays_left = h["plays"]
 	stock = h["stock"]
-	earned = h["earned"]
+	echo_gain = h["echo"]
 	return true
 
 
@@ -312,8 +312,9 @@ func end_turn() -> Dictionary:
 func task_done(_sc: Dictionary = {}) -> bool:
 	if task.is_empty():
 		return false
+	var inc := income()
 	for r in task:
-		if int(earned.get(r, 0)) < int(task[r]):
+		if int(inc.get(r, 0)) < int(task[r]):
 			return false
 	return true
 
@@ -334,8 +335,18 @@ static func sum_res(d: Dictionary) -> int:
 	return n
 
 
-func earned_total() -> int:
-	return sum_res(earned)
+## Доход острова сейчас: то, что поле даст в конце, плюс уже полученное от Эхо.
+func income(sc: Dictionary = {}) -> Dictionary:
+	if sc.is_empty():
+		sc = score()
+	var t: Dictionary = sc["total"].duplicate()
+	for r in echo_gain:
+		t[r] = int(t.get(r, 0)) + int(echo_gain[r])
+	return t
+
+
+func income_total() -> int:
+	return sum_res(income())
 
 
 func _add_stock(d: Dictionary) -> void:
@@ -345,8 +356,9 @@ func _add_stock(d: Dictionary) -> void:
 
 func _finish_field() -> Dictionary:
 	var sc: Dictionary = score()
-	var prod: Dictionary = earned.duplicate()
-	var res := {"prod": prod, "lives_before": lives, "island": island}
+	var prod: Dictionary = income(sc)
+	var res := {"prod": prod, "lives_before": lives, "island": island, "echo": echo_gain.duplicate()}
+	_add_stock(sc["total"])
 	_add_stock(island.get("reward", {}))
 	res["reward"] = island.get("reward", {})
 	res["task"] = task.duplicate()
@@ -358,7 +370,7 @@ func _finish_field() -> Dictionary:
 	res["joy"] = int(sc.get("joy", 0))
 	if is_boss():
 		var b: Dictionary = island["boss"]
-		var total := earned_total()
+		var total := sum_res(prod)
 		res["boss"] = b
 		res["boss_total"] = total
 		res["boss_missing"] = maxi(0, int(b["need"]) - total)
@@ -423,7 +435,66 @@ func _make_market() -> void:
 	var con := {"res": colors[rng.randi_range(0, colors.size() - 1)],
 		"amount": rng.randi_range(int(cc["amount"][0]), int(cc["amount"][1])),
 		"reward": cc.get("reward", {}), "progress": 0}
-	market = {"buy": buy, "bought": buy.map(func(_x): return false), "contract": con, "contract_taken": false}
+	market = {"buy": buy, "bought": buy.map(func(_x): return false), "contract": con, "contract_taken": false, "echo3": ""}
+	# Редкое Эхо III: одно предложение на рынок, с нужного спринта
+	var ec: Dictionary = market_cfg().get("echo", {})
+	if market_no() >= int(ec.get("echo3_from_sprint", 3)) and rng.randf() < float(ec.get("echo3_chance", 0.5)):
+		var cand := []
+		for id in all_cards():
+			if data.is_producer(id) and data.echo_level(id) < 3 and not data.is_upgraded(id) and not (data.base_id(id) in cand):
+				cand.append(data.base_id(id))
+		if not cand.is_empty():
+			market["echo3"] = cand[rng.randi_range(0, cand.size() - 1)]
+
+
+## Номер рынка: 1 — после первого спринта.
+func market_no() -> int:
+	return sprint + 1
+
+
+## Следующий шаг Эхо для карты на этом рынке ("" — нельзя).
+func echo_next(id: String) -> String:
+	var nx: String = data.echo_next(id)
+	if nx == "":
+		return ""
+	if data.echo_level(nx) == 2 and market_no() < int(market_cfg().get("echo", {}).get("echo2_from_sprint", 2)):
+		return ""
+	return nx
+
+
+func echo_price(id: String, level: int) -> Dictionary:
+	var ec: Dictionary = market_cfg().get("echo", {})
+	var n := int(ec.get("echo%d_cost" % level, 10))
+	var c: String = data.color_of(id)
+	return {c: n} if data.colors.has(c) else {"any": n}
+
+
+## Карте — следующий шаг Эхо (I → II). Заменяет одну копию.
+func echo(id: String) -> bool:
+	if phase != "market" or not _has_card(id):
+		return false
+	var nx := echo_next(id)
+	if nx == "" or not _spend(echo_price(id, data.echo_level(nx))):
+		return false
+	_replace_card(id, nx)
+	return true
+
+
+## Купить редкое Эхо III: одна карта этого здания (лучше уже с Эхо) получает Эхо III.
+func buy_echo3() -> bool:
+	if phase != "market" or market.get("echo3", "") == "":
+		return false
+	var bid: String = market["echo3"]
+	var best := ""
+	for id in all_cards():
+		if data.base_id(id) == bid and data.echo_level(id) < 3 and not data.is_upgraded(id):
+			if best == "" or data.echo_level(id) > data.echo_level(best):
+				best = id
+	if best == "" or not _spend(echo_price(bid, 3)):
+		return false
+	_replace_card(best, bid + "*3")
+	market["echo3"] = ""
+	return true
 
 
 ## Цена карты на рынке: {res: n}; у жилья и городских — {"any": n}.

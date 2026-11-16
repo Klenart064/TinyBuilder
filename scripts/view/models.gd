@@ -12,6 +12,7 @@ const STONE := Color("#9a9a9f")
 const STONE_DARK := Color("#6e6e75")
 const PLASTER := Color("#efe6d2")
 const ROOF := Color("#8a3b2a")
+const ECHO := Color("#5fe3ff")
 
 var alpha := 1.0
 var root: Node3D
@@ -21,7 +22,12 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 	var m = new()
 	m.alpha = alpha_
 	m.root = Node3D.new()
-	match id.trim_suffix("+"):
+	var bid := id.trim_suffix("+")
+	var echo_lv := 0
+	if bid.contains("*"):
+		echo_lv = int(bid.get_slice("*", 1))
+		bid = bid.get_slice("*", 0)
+	match bid:
 		"field": m._field()
 		"mill": m._mill()
 		"mine": m._mine()
@@ -35,7 +41,51 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 		_: return null
 	if id.ends_with("+"):
 		m._upgrade_flag()
+	if echo_lv > 0:
+		m._echo_rings(echo_lv)
 	return m.root
+
+
+## Эхо: голубые светящиеся кольца у основания (сколько уровень — столько колец).
+func _echo_rings(n: int) -> void:
+	for k in n:
+		var t := TorusMesh.new()
+		t.inner_radius = 0.42 + k * 0.07
+		t.outer_radius = 0.46 + k * 0.07
+		t.rings = 24
+		t.ring_segments = 6
+		_put(t, Vector3(0, 0.05 + k * 0.05, 0), ECHO, Vector3.ZERO, true)
+
+
+## Уровень мастерской на острове (0–4): пристройки по углам клетки и значок с точками.
+## Только вид — доход не меняется. Пристройка по цвету: еда — стог и мешки, золото — ящики и слиток, сила — шатёр и знамя.
+static func add_level(root_: Node3D, id: String, level: int, alpha_: float = 1.0) -> void:
+	if level <= 0:
+		return
+	var m = new()
+	m.alpha = alpha_
+	m.root = Node3D.new()
+	root_.add_child(m.root)
+	var corners := [Vector3(-0.36, 0, 0.36), Vector3(0.36, 0, 0.36), Vector3(0.36, 0, -0.36), Vector3(-0.36, 0, -0.36)]
+	var bid := id.trim_suffix("+").get_slice("*", 0)
+	for k in mini(level, 4):
+		var c: Vector3 = corners[k]
+		match bid:
+			"mill":
+				# Амбар со стогом
+				m.box(Vector3(0.2, 0.16, 0.18), c + Vector3(0, 0.08, 0), WOOD)
+				m.roof(0.22, 0.1, 0.2, c + Vector3(0, 0.21, 0), ROOF)
+				m.cyl(0.0, 0.11, 0.2, c + Vector3(0.12, 0.1, -0.1), FOOD, 8)
+			"smithy":
+				# Склад с ящиками и слитком
+				m.box(Vector3(0.18, 0.14, 0.18), c + Vector3(0, 0.07, 0), WOOD)
+				m.box(Vector3(0.12, 0.1, 0.12), c + Vector3(0.02, 0.19, 0.02), WOOD_DARK)
+				m.box(Vector3(0.12, 0.06, 0.07), c + Vector3(0, 0.27, 0), GOLD, Vector3.ZERO, true)
+			_:
+				# Шатёр со знаменем
+				m.cyl(0.0, 0.16, 0.26, c + Vector3(0, 0.13, 0), Color("#d8cfc0"), 6)
+				m.box(Vector3(0.025, 0.42, 0.025), c + Vector3(0.12, 0.21, 0), WOOD_DARK)
+				m.box(Vector3(0.14, 0.09, 0.015), c + Vector3(0.19, 0.37, 0), FORCE)
 
 
 ## Улучшенная карта: золотой флажок на углу клетки.
