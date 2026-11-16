@@ -6,7 +6,7 @@
 
 ## Как запустить
 
-1. Скачайте [Godot 4.5 или новее](https://godotengine.org/download) (обычная версия, не .NET).
+1. Скачайте [Godot 4.7 или новее](https://godotengine.org/download) (обычная версия, не .NET).
 2. Запустите Godot, нажмите **Import** и выберите файл `project.godot` из этой папки.
 3. Нажмите **F5** (или ▶ в правом верхнем углу).
 
