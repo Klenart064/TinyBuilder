@@ -1155,7 +1155,7 @@ func _refresh_side() -> void:
 	t += "Озеро: +1%s соседям.\n" % food
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
 	t += "Излишки идут на следующее поле.\n"
-	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена[/color]"
+	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, F11 полный экран[/color]"
 	rb.add_child(_rich_line(t, 13))
 
 
@@ -1310,6 +1310,15 @@ func _select(i: int) -> void:
 	_refresh_hand()
 	_refresh_hint()
 	_update_hover()
+
+
+## F11 или Alt+Enter — полный экран и обратно.
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
+			var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+			get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
