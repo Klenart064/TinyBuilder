@@ -28,6 +28,7 @@ func _initialize() -> void:
 	test_echo()
 	test_forge()
 	test_cube()
+	test_menu()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -513,3 +514,30 @@ func _check(ok: bool, name: String) -> void:
 	else:
 		failures += 1
 		print("FAIL  ", name)
+
+
+func test_menu() -> void:
+	var LandTest = load("res://scripts/land/land_test.gd")
+	var ok := true
+	var bad := ""
+	for e in LandTest.BOSSES + LandTest.ISLANDS + LandTest.LAND:
+		var run := LandRun.new()
+		LandTest.jump(run, data, e["id"], 0)
+		var want := "market" if e["id"] == "market" else "island"
+		var good: bool = run.phase == want
+		if e["id"] in ["tetra", "cube", "drum"]:
+			good = good and run.is_cube() and run.field.shape == e["id"]
+		elif e["id"] in ["raid", "king"]:
+			good = good and run.is_boss() and not run.is_cube()
+		elif e["id"] == "big":
+			good = good and run.island["big"] and run.turns_here() == int(data.run["big_turns"])
+		elif e["id"] == "forge":
+			good = good and run.island.has("forge")
+		elif e["id"] == "task":
+			good = good and not run.task.is_empty()
+		elif e["id"] in data.events:
+			good = good and run.event_type == e["id"]
+		if not good:
+			ok = false
+			bad += e["id"] + " "
+	_check(ok, "тест-меню: каждый босс и остров запускается как надо %s" % bad)

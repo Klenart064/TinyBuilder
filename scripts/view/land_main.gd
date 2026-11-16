@@ -9,6 +9,7 @@ const LandEvents = preload("res://scripts/land/land_events.gd")
 const Models = preload("res://scripts/view/models.gd")
 const LandBot = preload("res://scripts/land/land_bot.gd")
 const ShapeField = preload("res://scripts/land/shape_field.gd")
+const LandTest = preload("res://scripts/land/land_test.gd")
 
 const STEP := 1.15
 const TILE_COLOR := Color("#5d7a3a")
@@ -1686,7 +1687,13 @@ func _input(event: InputEvent) -> void:
 			_turn_camera(1 if event.keycode == KEY_Q else -1)
 			get_viewport().set_input_as_handled()
 		elif event.keycode in [KEY_F2, KEY_F3, KEY_F4] and not busy:
-			_skip_to_cube({KEY_F2: "cube", KEY_F3: "tetra", KEY_F4: "drum"}[event.keycode])
+			_test_jump({KEY_F2: "cube", KEY_F3: "tetra", KEY_F4: "drum"}[event.keycode])
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_F1 and not busy:
+			if overlay_mode == "test":
+				_close_test_menu()
+			else:
+				_show_test_menu()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_D and not busy:
 			_show_deck()
@@ -1941,6 +1948,8 @@ func _show_field_result(res: Dictionary) -> void:
 		_overlay_button("На рынок", _show_market)
 	else:
 		_overlay_button("К карте маршрута", _show_map)
+	if res["island"].get("test", false):
+		_overlay_button("Тест-меню (F1)", _show_test_menu)
 	_show_overlay(s, 600)
 
 
@@ -1963,6 +1972,8 @@ func _show_map() -> void:
 	_refresh_map_detail()
 	var deck_b := _overlay_button("Колода (D)", _show_deck)
 	deck_b.custom_minimum_size = Vector2(150, 44)
+	var test_b := _overlay_button("Тест-меню (F1)", _show_test_menu)
+	test_b.custom_minimum_size = Vector2(170, 44)
 	_show_overlay(s, 1220)
 
 
@@ -2445,6 +2456,7 @@ func _close_deck() -> void:
 	match _deck_back:
 		"map": _show_map()
 		"market": _show_market()
+		"test": _show_test_menu()
 		_: _hide_overlay()
 
 
@@ -2900,24 +2912,97 @@ func _cube_judge_fx(j: Dictionary) -> float:
 
 
 ## F2 (для проверки): новый забег, бот доигрывает до босса-куба, жизни восстановлены.
-func _skip_to_cube(shape: String = "cube") -> void:
-	for attempt in 20:
-		run.start(data, -1)
-		while not run.game_over and not (run.phase == "map" and run.choices.size() == 1 and run.choices[0].get("boss", {}).get("cube", {}).get("shape", "") == shape):
+# ---------------------------------------------------------------- Тест-меню
+
+## Колода как в начале спринта test_stage (0–3); -1 — «своё место» (босс — свой спринт, остров — 1-й)
+var test_stage := -1
+var _test_back := ""
+
+func _show_test_menu() -> void:
+	if busy:
+		return
+	if overlay_mode != "test":
+		_test_back = overlay_mode if overlay.visible else ""
+	_clear_overlay()
+	overlay_mode = "test"
+	var s := "[center][b][font_size=24]Тест-меню[/font_size][/b]\n[color=#a9b4c0]Выберите босса или остров: бот доиграет новый забег до нужного спринта (колода как в игре), и вы сразу окажетесь там. Жизни полные.[/color][/center]"
+	# Колода: с какого спринта
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 6)
+	overlay_body.add_child(row)
+	row.add_child(_label("Колода как перед:", 16, Color("#d7dde4")))
+	var opts := [[-1, "своим местом"], [0, "спринтом 1"], [1, "спринтом 2"], [2, "спринтом 3"], [3, "спринтом 4"]]
+	for o in opts:
+		var tb := Button.new()
+		tb.text = o[1]
+		tb.toggle_mode = true
+		tb.button_pressed = test_stage == int(o[0])
+		tb.focus_mode = Control.FOCUS_NONE
+		tb.custom_minimum_size = Vector2(130, 36)
+		tb.add_theme_font_size_override("font_size", 15)
+		var v: int = o[0]
+		tb.pressed.connect(func(): test_stage = v; _show_test_menu())
+		row.add_child(tb)
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 16)
+	cols.alignment = BoxContainer.ALIGNMENT_CENTER
+	overlay_body.add_child(cols)
+	var lists := [["Боссы", Color("#eb5757"), LandTest.BOSSES], ["Острова", Color("#7fa04f"), LandTest.ISLANDS], ["Живая земля", LAND_COLOR, LandTest.LAND]]
+	for l in lists:
+		var col := VBoxContainer.new()
+		col.custom_minimum_size = Vector2(330, 0)
+		col.add_theme_constant_override("separation", 6)
+		cols.add_child(col)
+		var title := _label(l[0], 20, l[1])
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(title)
+		for e in l[2]:
+			var where := ""
+			if e.has("stage"):
+				where = "  [color=#a9b4c0]· спринт %d[/color]" % (int(e["stage"]) + 1)
+			var b := _rich_button("[b]%s[/b]%s\n[font_size=13][color=#a9b4c0]%s[/color][/font_size]" % [e["name"], where, e["desc"]], false, 15)
+			b.custom_minimum_size = Vector2(0, 54)
+			var kind: String = e["id"]
+			b.pressed.connect(func(): _test_jump(kind))
+			col.add_child(b)
+	_overlay_button("Закрыть (F1)", _close_test_menu).custom_minimum_size = Vector2(150, 44)
+	_overlay_button("Новый забег", _new_run).custom_minimum_size = Vector2(150, 44)
+	_show_overlay(s, 1080)
+
+
+func _close_test_menu() -> void:
+	match _test_back:
+		"map": _show_map()
+		"market": _show_market()
+		"": _hide_overlay()
+		_:
 			if run.phase == "map":
-				run.choose_island(LandBot.pick_island(run, true))
+				_show_map()
 			elif run.phase == "market":
-				LandBot.shop(run, true)
-				run.leave_market()
-			LandBot.play_turn(run, true)
-			run.lives = maxi(run.lives, 30)
-			run.end_turn()
-		if not run.game_over:
-			break
-	run.lives = int(data.run["lives"])
+				_show_market()
+			else:
+				_hide_overlay()
+
+
+## Быстрый запуск: F2/F3/F4 и кнопки тест-меню.
+func _test_jump(kind: String) -> void:
+	if busy:
+		return
+	busy = true
+	_hide_overlay()
+	var stage := test_stage
+	if stage < 0:
+		stage = LandTest.boss_stage(kind)
+	_show_toast("[center][b]Бот готовит колоду: спринт %d...[/b][/center]" % (stage + 1))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	LandTest.jump(run, data, kind, stage)
 	selected = -1
 	busy = false
-	_hide_overlay()
+	cam_yaw = 0.0
 	_full_refresh()
-	_show_map()
-	_show_toast("[center][b]Бот доиграл до босса: %s[/b]\n[font_size=16]Жизни восстановлены. Выберите босса на карте.[/font_size][/center]" % SHAPE_WORD.get(shape, shape))
+	if run.phase == "market":
+		_show_market()
+	else:
+		_announce_field()
