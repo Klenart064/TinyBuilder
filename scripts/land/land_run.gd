@@ -409,6 +409,9 @@ func end_turn() -> Dictionary:
 		out["field_done"] = true
 		out["result"] = _finish_field()
 		return out
+	# Остров из частей: смена острова, поворот или переворот
+	if field.has_method("advance"):
+		out["shift"] = field.advance()
 	turn += 1
 	plays_left = plays_per_turn()
 	var need := int(data.run["hand_size"]) - hand.size()

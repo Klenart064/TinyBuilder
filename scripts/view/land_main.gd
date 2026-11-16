@@ -24,6 +24,9 @@ const DANGER_COLOR := Color("#ff5a3c")
 const GROW_COLOR := Color("#7dffa0")
 const GREY_COLOR := Color("#b9b2a6")
 const ECHO_COLOR := Color("#5fe3ff")
+const ROAD_COLOR := Color("#e8c47c")
+const PATH_COLOR := Color("#efe2c4")
+const BRIDGE_COLOR := Color("#8a5a33")
 const SEAL_COLOR := Color("#ffb347")
 const SEAL_DONE_COLOR := Color("#6fcf97")
 const CAMERA_BASE := Vector3(7.3, 7.1, 7.3)
@@ -38,6 +41,9 @@ const SHAPE_DESC := {
 var roll_hover := -1
 ## Куб: поворот камеры вокруг куба (Q/E), радианы
 var cam_yaw := 0.0
+var part_roots: Array = []
+var cross_nodes: Array = []
+var under_nodes: Array = []
 ## Масштаб значков над полем (у больших фигур камера дальше)
 var badge_k := 1.0
 var _cam_turning := false
@@ -147,6 +153,8 @@ func _build_world() -> void:
 func cell_pos(i: int) -> Vector3:
 	if _is_cube():
 		return run.field.orient * run.field.center(i) * STEP + _cube_off()
+	if _is_multi():
+		return run.field.world(i) * STEP
 	return Vector3((i % LandField.SIZE - 1.5) * STEP, 0, (i / LandField.SIZE - 1.5) * STEP)
 
 
@@ -154,11 +162,45 @@ func cell_pos(i: int) -> Vector3:
 func cell_up(i: int) -> Vector3:
 	if _is_cube():
 		return run.field.world_normal(run.field.face_of(i))
+	if _is_multi():
+		return run.field.up(i)
 	return Vector3.UP
 
 
 func _shape_word() -> String:
 	return SHAPE_WORD.get(run.field.shape, "куб") if _is_cube() else "куб"
+
+
+## Остров из частей: парные, вращающиеся, перевёртыш.
+func _is_multi() -> bool:
+	return run != null and run.field != null and run.field.has_method("advance")
+
+
+## Куда класть узлы клетки: у острова из частей — в узел своей части (чтобы её можно было вращать).
+func _cell_parent(i: int) -> Node3D:
+	if _is_multi() and run.field.kind == "spin" and part_roots.size() > 0:
+		return part_roots[run.field.part_of[i]]
+	return board_root
+
+
+func _multi_info() -> void:
+	var f = run.field
+	var side := ["левом", "правом"]
+	match f.kind:
+		"pair":
+			var mb := _section(info_box, "Парные острова", ECHO_COLOR, 18)
+			mb.add_child(_rich_line("Сейчас стройте на [b]%s[/b] острове, после хода — на %s. Здания у общей границы — соседи через мост." % [side[f.active], side[1 - f.active]], 15))
+		"spin":
+			var sb := _section(info_box, "Вращающиеся острова", ECHO_COLOR, 18)
+			var last: bool = run.turn >= run.turns_here()
+			if last:
+				sb.add_child(_rich_line("Последний ход: острова больше не повернутся.", 15))
+			else:
+				sb.add_child(_rich_line("После хода [b]%s[/b] остров повернётся на четверть по часовой (голубая стрелка). Соседи через мост сменятся." % ("левый" if f.spin_next == 0 else "правый"), 15))
+		"flip":
+			var fb := _section(info_box, "Перевёртыш", ECHO_COLOR, 18)
+			var under: int = f.buildings_on(data, 1 - f.active)
+			fb.add_child(_rich_line("Сверху сторона [b]%s[/b]. После хода остров перевернётся. Снизу зданий: %d — они тоже приносят доход, а клетки края связаны через ребро." % ["А" if f.active == 0 else "Б", under], 15))
 
 
 func _is_cube() -> bool:
@@ -385,7 +427,28 @@ func _rebuild_board() -> void:
 	var f = run.field
 	var sc: Dictionary = run.score()
 	var cube := _is_cube()
+	var multi := _is_multi()
+	part_roots = []
+	cross_nodes = []
+	under_nodes = []
+	board_root.transform = Transform3D.IDENTITY
 	_update_camera()
+	if multi:
+		for k in f.part_count():
+			var pr := Node3D.new()
+			board_root.add_child(pr)
+			part_roots.append(pr)
+		if f.kind == "flip":
+			# Тело перевёртыша между сторонами
+			var body := MeshInstance3D.new()
+			var w: int = f.parts[0]["w"]
+			var h: int = f.parts[0]["h"]
+			body.mesh = _box_mesh(Vector3(w * STEP - 0.05, f.THICK * STEP - 0.62, h * STEP - 0.05))
+			body.position = Vector3(0, -f.THICK * STEP / 2, 0)
+			body.material_override = _mat(Color("#4a3a2a"))
+			board_root.add_child(body)
+		elif f.kind == "spin":
+			_spin_marker(f)
 	if cube:
 		# Барабан: торцы-шестиугольники
 		if f.shape == "drum":
@@ -444,17 +507,21 @@ func _rebuild_board() -> void:
 		else:
 			tile.mesh = _box_mesh(Vector3(1.05, 0.3, 1.05))
 			tile.position = p - cell_up(i) * 0.15
+			if multi:
+				tile.basis = _face_basis(cell_up(i))
 		var base := _tile_color(i)
 		if cube and f.broken[run.field.face_of(i)]:
 			base = base.lerp(Color("#9bbf6a"), 0.35)
+		if multi and f.kind == "pair" and f.part_of[i] != f.active:
+			base = base.darkened(0.35)
 		var mat := _mat(base)
 		tile.material_override = mat
-		board_root.add_child(tile)
+		_cell_parent(i).add_child(tile)
 		tiles[i] = tile
 		tile_mats[i] = mat
 		tile_base[i] = base
 		# Земляной «бок» под клеткой
-		if not cube:
+		if not cube and not (multi and f.kind == "flip"):
 			var dirt := MeshInstance3D.new()
 			dirt.mesh = _box_mesh(Vector3(1.0, 0.4, 1.0))
 			dirt.position = Vector3(0, -0.3, 0)
@@ -471,18 +538,26 @@ func _rebuild_board() -> void:
 				node.basis = _face_basis(cell_up(i))
 				if f.is_tri():
 					node.basis = node.basis.scaled(Vector3.ONE * 0.72)
-			board_root.add_child(node)
+			elif multi:
+				node.basis = _face_basis(cell_up(i))
+				if cell_up(i).y < 0:
+					# нижняя сторона перевёртыша: видна только во время переворота
+					node.visible = false
+					under_nodes.append(node)
+			_cell_parent(i).add_child(node)
 			objs[i] = node
 
 	# Связи: пары, дом, конфликты
 	for l in sc["links"]:
 		if cube and not (_cell_visible(l["a"]) and _cell_visible(l["b"])):
 			continue
+		if multi and (cell_up(l["a"]).y < 0 or cell_up(l["b"]).y < 0) and not (cell_up(l["a"]).y > 0 or cell_up(l["b"]).y > 0):
+			continue
 		match l["type"]:
 			"pair":
-				board_root.add_child(_link_mesh(l["a"], l["b"], 0.12, 0.03, _glow_mat(PAIR_COLOR, 0.9)))
+				_road(l["a"], l["b"], 0.34, ROAD_COLOR)
 			"house", "tavern":
-				board_root.add_child(_link_mesh(l["a"], l["b"], 0.07, 0.03, _glow_mat(HOUSE_COLOR, 0.6)))
+				_road(l["a"], l["b"], 0.22, PATH_COLOR)
 			"conflict":
 				board_root.add_child(_link_mesh(l["a"], l["b"], 0.12, 0.03, _glow_mat(CONFLICT_COLOR, 0.9)))
 				var mid: Vector3 = (cell_pos(l["a"]) + cell_pos(l["b"])) / 2 + (cell_up(l["a"]) + cell_up(l["b"])).normalized() * 0.6
@@ -496,9 +571,11 @@ func _rebuild_board() -> void:
 			continue
 		if cube and not _cell_visible(i):
 			continue
+		if multi and cell_up(i).y < 0:
+			continue
 		var holder := Node3D.new()
 		holder.position = cell_pos(i) + cell_up(i) * (float(data.objects[f.content[i]].get("height", 0.9)) + 0.3)
-		board_root.add_child(holder)
+		_cell_parent(i).add_child(holder)
 		var lv: int = f.level(data, i)
 		if lv > 0:
 			var lb := _text_badge("ур. %d" % lv, 26, Color("#f2c94c"))
@@ -527,7 +604,7 @@ func _terrain_label(i: int) -> void:
 	else:
 		node = _make_badge({t["color"]: int(t["bonus"])}, 26, Color.WHITE, 3)
 	node.position = cell_pos(i) + Vector3(-0.28, 0.12, 0.28)
-	board_root.add_child(node)
+	_cell_parent(i).add_child(node)
 
 func _dim(node: Node3D) -> void:
 	if node == null:
@@ -535,6 +612,141 @@ func _dim(node: Node3D) -> void:
 	for c in node.get_children():
 		if c is MeshInstance3D and c.material_override is StandardMaterial3D:
 			c.material_override.albedo_color = c.material_override.albedo_color.darkened(0.55)
+
+
+## Дорога между связанными зданиями: идёт по клеткам, через ребро фигуры перегибается,
+## между островами — мост.
+func _road(a: int, b: int, width: float, color: Color) -> void:
+	var f = run.field
+	var segs := []
+	if _is_multi():
+		for sg in f.link_path(a, b):
+			segs.append({"p": sg["p"] * STEP, "q": sg["q"] * STEP, "up": sg["up"], "bridge": sg["bridge"]})
+	elif _is_cube() and f.face_of(a) != f.face_of(b):
+		var shared := []
+		for v in f.poly(a):
+			for u in f.poly(b):
+				if (v as Vector3).distance_to(u) < 0.01:
+					shared.append(v)
+		var mid := Vector3.ZERO
+		for v in shared:
+			mid += v
+		mid = f.orient * (mid / maxi(1, shared.size())) * STEP + _cube_off()
+		segs.append({"p": cell_pos(a), "q": mid, "up": cell_up(a), "bridge": false})
+		segs.append({"p": mid, "q": cell_pos(b), "up": cell_up(b), "bridge": false})
+	else:
+		segs.append({"p": cell_pos(a), "q": cell_pos(b), "up": cell_up(a), "bridge": false})
+	var parent: Node3D = board_root
+	if _is_multi() and f.kind == "spin" and f.part_of[a] == f.part_of[b]:
+		parent = part_roots[f.part_of[a]]
+	for sg in segs:
+		var up: Vector3 = sg["up"]
+		var pa: Vector3 = sg["p"] + up * 0.035
+		var pb: Vector3 = sg["q"] + up * 0.035
+		var length := pa.distance_to(pb)
+		if length < 0.01:
+			continue
+		var bas := Basis.looking_at(pb - pa, up)
+		var node := Node3D.new()
+		node.transform = Transform3D(bas, (pa + pb) / 2)
+		parent.add_child(node)
+		if parent == board_root and _is_multi():
+			cross_nodes.append(node)
+		if sg["bridge"]:
+			# Мост: доски и перила
+			var deck := MeshInstance3D.new()
+			deck.mesh = _box_mesh(Vector3(width + 0.14, 0.06, length + 0.2))
+			deck.material_override = _mat(BRIDGE_COLOR)
+			node.add_child(deck)
+			for sx in [-1.0, 1.0]:
+				var rail := MeshInstance3D.new()
+				rail.mesh = _box_mesh(Vector3(0.04, 0.05, length + 0.2))
+				rail.position = Vector3(sx * (width / 2 + 0.09), 0.14, 0)
+				rail.material_override = _mat(BRIDGE_COLOR.darkened(0.3))
+				node.add_child(rail)
+				for pz in [-0.5, 0.5]:
+					var post := MeshInstance3D.new()
+					post.mesh = _box_mesh(Vector3(0.05, 0.16, 0.05))
+					post.position = Vector3(sx * (width / 2 + 0.09), 0.07, pz * (length + 0.1))
+					post.material_override = rail.material_override
+					node.add_child(post)
+		else:
+			# Дорога: светлая полоса с тёмной обочиной
+			var edge := MeshInstance3D.new()
+			edge.mesh = _box_mesh(Vector3(width + 0.07, 0.025, length + 0.07))
+			edge.material_override = _mat(color.darkened(0.45))
+			node.add_child(edge)
+			var top := MeshInstance3D.new()
+			top.mesh = _box_mesh(Vector3(width, 0.03, length + 0.02))
+			top.position = Vector3(0, 0.012, 0)
+			top.material_override = _mat(color)
+			node.add_child(top)
+
+
+## Вращающиеся острова: голубая круговая стрелка вокруг острова, который повернётся после хода.
+func _spin_marker(f) -> void:
+	var c: Vector3 = f.part_center(f.spin_next) * STEP
+	var r := 1.95 * STEP
+	var mat := _glow_mat(ECHO_COLOR, 0.85)
+	var t0 := -PI * 0.75
+	var steps := 22
+	var span := PI * 1.5
+	for k in steps:
+		var a0 := t0 + span * k / steps
+		var a1 := t0 + span * (k + 1) / steps
+		var p0 := c + Vector3(cos(a0), 0, sin(a0)) * r + Vector3(0, 0.08, 0)
+		var p1 := c + Vector3(cos(a1), 0, sin(a1)) * r + Vector3(0, 0.08, 0)
+		var mi := MeshInstance3D.new()
+		mi.mesh = _box_mesh(Vector3(0.1, 0.05, p0.distance_to(p1) + 0.02))
+		mi.transform = Transform3D(Basis.looking_at(p1 - p0, Vector3.UP), (p0 + p1) / 2)
+		mi.material_override = mat
+		board_root.add_child(mi)
+	var ae := t0 + span
+	var tip := c + Vector3(cos(ae), 0, sin(ae)) * r + Vector3(0, 0.08, 0)
+	var dir := Vector3(-sin(ae), 0, cos(ae))
+	var head := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 0.2
+	cone.height = 0.4
+	head.mesh = cone
+	head.material_override = mat
+	# конус смотрит вдоль dir
+	head.transform = Transform3D(Basis.looking_at(dir, Vector3.UP) * Basis(Vector3.RIGHT, -PI / 2), tip + dir * 0.15)
+	board_root.add_child(head)
+	cross_nodes.append(head)
+
+
+## Анимация конца хода у острова из частей. Доска ещё показывает старое состояние.
+func _animate_shift(sh: Dictionary) -> void:
+	match sh.get("kind", ""):
+		"spin":
+			for n in cross_nodes:
+				if is_instance_valid(n):
+					n.visible = false
+			var pr: Node3D = part_roots[int(sh["part"])]
+			var c: Vector3 = sh["center"] * STEP
+			var tw := create_tween()
+			tw.tween_method(func(t: float):
+				var lift := 0.9 * clampf(t / 0.25, 0.0, 1.0) * clampf((1.0 - t) / 0.25, 0.0, 1.0)
+				var ang := -PI / 2 * smoothstep(0.25, 0.75, t)
+				var b := Basis(Vector3.UP, ang)
+				pr.transform = Transform3D(b, c + Vector3(0, lift, 0) - b * c), 0.0, 1.0, 1.1)
+			await tw.finished
+		"flip":
+			for n in under_nodes:
+				if is_instance_valid(n):
+					n.visible = true
+			var pivot := Vector3(0, -run.field.THICK * STEP / 2, 0)
+			var tw2 := create_tween()
+			tw2.tween_method(func(t: float):
+				var lift := 1.6 * clampf(t / 0.2, 0.0, 1.0) * clampf((1.0 - t) / 0.2, 0.0, 1.0)
+				var ang := PI * smoothstep(0.2, 0.8, t)
+				var b := Basis(Vector3.RIGHT, ang)
+				board_root.transform = Transform3D(b, pivot + Vector3(0, lift, 0) - b * pivot), 0.0, 1.0, 1.2)
+			await tw2.finished
+		"pair":
+			_show_toast("[center][b]Теперь стройте на %s острове[/b][/center]" % ("левом" if int(sh["to"]) == 0 else "правом"))
 
 
 func _link_mesh(a: int, b: int, width: float, y: float, mat: Material) -> MeshInstance3D:
@@ -1294,6 +1506,9 @@ func _refresh_info() -> void:
 		lb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 		lb.add_child(_rich_line(LandEvents.describe(run.intent), 15))
 
+	if _is_multi():
+		_multi_info()
+
 	# Задание острова (не на каждом): выполнил — награда
 	if not run.task.is_empty():
 		var ok: bool = run.task_done(sc)
@@ -1818,6 +2033,14 @@ func _cell_at(screen_pos: Vector2) -> int:
 	if t < 0:
 		return -1
 	var p := from + dir * t
+	if _is_multi():
+		for i in run.field.cells_n():
+			if cell_up(i).y < 0.5:
+				continue
+			var c := cell_pos(i)
+			if absf(p.x - c.x) <= 0.55 and absf(p.z - c.z) <= 0.55:
+				return i
+		return -1
 	if _is_cube():
 		if run.cube_roll:
 			return -1
@@ -1866,6 +2089,8 @@ func _on_end_turn() -> void:
 		dur = maxf(dur, _cube_judge_fx(r["cube"]))
 	if dur > 0.0:
 		await get_tree().create_timer(dur + 0.15).timeout
+	if r.has("shift"):
+		await _animate_shift(r["shift"])
 	busy = false
 	_full_refresh()
 	if r.get("field_done", false):
@@ -2498,6 +2723,14 @@ func _update_camera() -> void:
 	camera.size = 7.8
 	badge_k = 1.0
 	var off := Vector3(7, 8, 7)
+	if _is_multi():
+		var ext := 0.0
+		for i in run.field.cells_n():
+			var w: Vector3 = run.field.world(i)
+			ext = maxf(ext, maxf(absf(w.x), absf(w.z)) * 2 + 1)
+		look = Vector3(0, 0, 0)
+		camera.size = 7.8 * maxf(1.0, ext / 4.2)
+		badge_k = maxf(1.0, camera.size / 9.0)
 	if _is_cube():
 		var rb := 0.0
 		for i in run.field.cells_n():
@@ -2945,13 +3178,13 @@ func _show_test_menu() -> void:
 		tb.pressed.connect(func(): test_stage = v; _show_test_menu())
 		row.add_child(tb)
 	var cols := HBoxContainer.new()
-	cols.add_theme_constant_override("separation", 16)
+	cols.add_theme_constant_override("separation", 12)
 	cols.alignment = BoxContainer.ALIGNMENT_CENTER
 	overlay_body.add_child(cols)
-	var lists := [["Боссы", Color("#eb5757"), LandTest.BOSSES], ["Острова", Color("#7fa04f"), LandTest.ISLANDS], ["Живая земля", LAND_COLOR, LandTest.LAND]]
+	var lists := [["Боссы", Color("#eb5757"), LandTest.BOSSES], ["Острова", Color("#7fa04f"), LandTest.ISLANDS], ["Живая земля", LAND_COLOR, LandTest.LAND], ["Из частей", ECHO_COLOR, LandTest.PARTS]]
 	for l in lists:
 		var col := VBoxContainer.new()
-		col.custom_minimum_size = Vector2(330, 0)
+		col.custom_minimum_size = Vector2(270, 0)
 		col.add_theme_constant_override("separation", 6)
 		cols.add_child(col)
 		var title := _label(l[0], 20, l[1])
@@ -2968,7 +3201,7 @@ func _show_test_menu() -> void:
 			col.add_child(b)
 	_overlay_button("Закрыть (F1)", _close_test_menu).custom_minimum_size = Vector2(150, 44)
 	_overlay_button("Новый забег", _new_run).custom_minimum_size = Vector2(150, 44)
-	_show_overlay(s, 1080)
+	_show_overlay(s, 1200)
 
 
 func _close_test_menu() -> void:

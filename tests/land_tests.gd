@@ -29,6 +29,7 @@ func _initialize() -> void:
 	test_forge()
 	test_cube()
 	test_menu()
+	test_parts()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -520,7 +521,7 @@ func test_menu() -> void:
 	var LandTest = load("res://scripts/land/land_test.gd")
 	var ok := true
 	var bad := ""
-	for e in LandTest.BOSSES + LandTest.ISLANDS + LandTest.LAND:
+	for e in LandTest.BOSSES + LandTest.ISLANDS + LandTest.LAND + LandTest.PARTS:
 		var run := LandRun.new()
 		LandTest.jump(run, data, e["id"], 0)
 		var want := "market" if e["id"] == "market" else "island"
@@ -535,9 +536,79 @@ func test_menu() -> void:
 			good = good and run.island.has("forge")
 		elif e["id"] == "task":
 			good = good and not run.task.is_empty()
+		elif LandTest.PART_TURNS.has(e["id"]):
+			good = good and run.field.has_method("advance") and run.turns_here() == int(LandTest.PART_TURNS[e["id"]])
 		elif e["id"] in data.events:
 			good = good and run.event_type == e["id"]
 		if not good:
 			ok = false
 			bad += e["id"] + " "
 	_check(ok, "тест-меню: каждый босс и остров запускается как надо %s" % bad)
+
+
+func test_parts() -> void:
+	var MF = load("res://scripts/land/multi_field.gd")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	# Парные: общая граница 3 клетки, строить можно только на активном
+	var p = MF.make("pair", rng)
+	var cross := 0
+	for i in p.cells_n():
+		for j in p.nbs(i):
+			if p.part_of[i] == 0 and p.part_of[j] == 1:
+				cross += 1
+	_check(cross == 3, "парные острова: общая граница 3 клетки (%d)" % cross)
+	var free0 := true
+	for i in p.free_cells():
+		if p.part_of[i] != 0:
+			free0 = false
+	p.advance()
+	var free1 := true
+	for i in p.free_cells():
+		if p.part_of[i] != 1:
+			free1 = false
+	_check(free0 and free1 and p.active == 1, "парные: строить можно только на активном острове, после хода — на другом")
+	# Вращающиеся: после поворота меняется, кто смотрит на соседа
+	var s = MF.make("spin", rng)
+	var edge_before := []
+	for i in s.cells_n():
+		for j in s.nbs(i):
+			if s.part_of[i] == 0 and s.part_of[j] == 1:
+				edge_before.append(i)
+	var sh: Dictionary = s.advance()
+	var edge_after := []
+	for i in s.cells_n():
+		for j in s.nbs(i):
+			if s.part_of[i] == 0 and s.part_of[j] == 1:
+				edge_after.append(i)
+	edge_before.sort()
+	edge_after.sort()
+	_check(sh["part"] == 0 and edge_after.size() == 3 and edge_before != edge_after and s.spin_next == 1, "вращающиеся: левый повернулся, к соседу теперь другие клетки, следующим повернётся правый")
+	# Перевёртыш: край связан через ребро, после переворота строим на другой стороне
+	var f = MF.make("flip", rng, "2x3")
+	var four := true
+	for i in f.cells_n():
+		if f.nbs(i).size() < 3:
+			four = false
+	var top0: int = f.active
+	f.advance()
+	var up_ok := true
+	for i in f.cells_n():
+		if (f.part_of[i] == f.active) != (f.up(i).y > 0):
+			up_ok = false
+	_check(four and f.active != top0 and up_ok, "перевёртыш: у каждой клетки сосед через ребро, после переворота сверху другая сторона")
+	# Мельница на краю видит Поле на другой стороне
+	var g = MF.make("flip", rng, "3x3")
+	for i in g.cells_n():
+		g.content[i] = ""
+	var a := -1
+	var b := -1
+	for i in g.cells_n():
+		for j in g.nbs(i):
+			if g.part_of[i] == 0 and g.part_of[j] == 1 and a < 0:
+				a = i
+				b = j
+	g.content[a] = "mill"
+	g.content[b] = "field"
+	var sc: Dictionary = g.score(data)
+	_check(int(sc["cells"][a]["yield"].get("food", 0)) == data.val("mill", "self") + data.val("mill", "per_base"), "перевёртыш: Мельница на ребре получает бонус от Поля снизу")

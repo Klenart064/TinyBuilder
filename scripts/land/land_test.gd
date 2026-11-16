@@ -6,14 +6,15 @@ extends RefCounted
 const LandGen = preload("res://scripts/land/land_gen.gd")
 const LandBot = preload("res://scripts/land/land_bot.gd")
 const ShapeField = preload("res://scripts/land/shape_field.gd")
+const MultiField = preload("res://scripts/land/multi_field.gd")
 
 ## Боссы: id, название, описание, спринт по умолчанию (0-based).
 const BOSSES := [
-	{"id": "tetra", "name": "Хрустальный тетраэдр", "desc": "4 треугольные грани, катить на любую, 6 ходов", "stage": 0},
-	{"id": "cube", "name": "Каменный куб", "desc": "6 граней 3×3, катить на соседнюю, 10 ходов", "stage": 1},
-	{"id": "drum", "name": "Жерновой барабан", "desc": "6 граней по кругу, крутится сам вперёд", "stage": 2},
-	{"id": "raid", "name": "Набег (старый)", "desc": "Обычный остров: набрать 24 всего за 3 хода", "stage": 1},
-	{"id": "king", "name": "Осада короля", "desc": "Финал: набрать 33 всего за 3 хода", "stage": 3},
+	{"id": "tetra", "name": "Хрустальный тетраэдр", "desc": "4 треугольные грани, 6 ходов", "stage": 0},
+	{"id": "cube", "name": "Каменный куб", "desc": "6 граней 3×3, 10 ходов", "stage": 1},
+	{"id": "drum", "name": "Жерновой барабан", "desc": "6 граней по кругу, только вперёд", "stage": 2},
+	{"id": "raid", "name": "Набег (старый)", "desc": "Набрать 24 всего за 3 хода", "stage": 1},
+	{"id": "king", "name": "Осада короля", "desc": "Финал: 33 всего за 3 хода", "stage": 3},
 ]
 
 ## Острова: id, название, описание.
@@ -22,7 +23,7 @@ const ISLANDS := [
 	{"id": "big", "name": "Большой", "desc": "11–13 клеток, 4 хода"},
 	{"id": "task", "name": "С заданием", "desc": "Произвести N одного цвета"},
 	{"id": "forge", "name": "Кузница", "desc": "Наковальня: рецепт даёт сталь"},
-	{"id": "market", "name": "Рынок", "desc": "Сразу на рынок после спринта"},
+	{"id": "market", "name": "Рынок", "desc": "Сразу на рынок"},
 ]
 
 ## Живая земля: события острова.
@@ -33,6 +34,16 @@ const LAND := [
 	{"id": "destroy", "name": "Трещины (опасный)", "desc": "Постройки на трещинах рушатся"},
 	{"id": "collapse", "name": "Обрыв (опасный)", "desc": "Край острова обрушивается"},
 ]
+
+
+## Острова из частей.
+const PARTS := [
+	{"id": "pair", "name": "Парные острова", "desc": "По очереди на каждом, 6 ходов"},
+	{"id": "spin", "name": "Вращающиеся", "desc": "Поворот после хода, 6 ходов"},
+	{"id": "flip23", "name": "Перевёртыш 2×3", "desc": "Переворот каждый ход, 4 хода"},
+	{"id": "flip33", "name": "Перевёртыш 3×3", "desc": "Переворот каждый ход, 6 ходов"},
+]
+const PART_TURNS := {"pair": 6, "spin": 6, "flip23": 4, "flip33": 6}
 
 
 static func boss_stage(kind: String) -> int:
@@ -95,6 +106,13 @@ static func make_island(run, data, kind: String) -> Dictionary:
 		if boss.has("cube"):
 			isl["field"] = ShapeField.make(data, rng, boss["cube"])
 			isl["turns"] = int(boss["cube"].get("max_turns", 12))
+	if PART_TURNS.has(kind):
+		var mk: String = "flip" if kind.begins_with("flip") else kind
+		isl["field"] = MultiField.make(mk, rng, "2x3" if kind == "flip23" else "3x3")
+		isl["turns"] = int(PART_TURNS[kind])
+		isl["big"] = false
+		isl["task"] = {}
+		isl["parts"] = kind
 	isl["lane"] = (int(data.run.get("lanes", 3)) - 1) / 2
 	isl["sprint"] = run.sprint
 	isl["layer"] = run.layer
