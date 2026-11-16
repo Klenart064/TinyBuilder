@@ -1,0 +1,34 @@
+{
+  "_help": "Параметры забега. Все диапазоны — [мин, макс] включительно. fields — через сколько полей наступает угроза. need — сколько ресурсов нужно (они тратятся).",
+  "hand_size": [4, 5],
+  "rock_cells": [0, 2],
+  "prebuilt_cells": [1, 2],
+  "prebuilt_pool": ["field", "field", "house", "mill", "wall", "mine", "tower", "market"],
+  "_goals_help": "Задание поля: набрать ресурс на этом поле. Цель считается от максимума, которого можно добиться текущей рукой: доля goal_difficulty растёт от первого значения ко второму за difficulty_ramp_fields полей (± goal_difficulty_spread). min_target — задание не даётся, если рукой нельзя набрать хотя бы столько.",
+  "goals": [
+    { "resource": "food",  "min_target": 4, "reward": { "gold": 5 } },
+    { "resource": "force", "min_target": 3, "reward": { "gold": 5 } },
+    { "resource": "gold",  "min_target": 3, "reward": { "force": 4 } }
+  ],
+  "_paths_help": "Выбор пути: после каждого поля игрок выбирает одно из этих полей. difficulty_shift — насколько задание ближе к максимуму, reward_mult — множитель награды, card_reward — новая карта в колоду за задание, rock_cells — сколько камней.",
+  "paths": [
+    { "id": "calm", "title": "Спокойные земли", "desc": "Задание проще, обычная награда", "difficulty_shift": -0.15, "reward_mult": 1, "rock_cells": [0, 1] },
+    { "id": "wild", "title": "Дикие земли", "desc": "Больше камней, задание сложнее, но награда ×2 и новая карта", "difficulty_shift": 0.2, "reward_mult": 2, "card_reward": true, "rock_cells": [1, 3] }
+  ],
+  "generation": {
+    "max_attempts": 10,
+    "rock_forbidden_cells": [4],
+    "goal_difficulty": [0.6, 0.95],
+    "goal_difficulty_spread": 0.1,
+    "difficulty_ramp_fields": 16
+  },
+  "reward_choices": 3,
+  "reward_pool": ["house", "field", "mill", "barracks", "tower", "wall", "mine", "smithy", "market"],
+  "threats": [
+    { "name": "Набег соседей",      "fields": 4, "need": { "force": 10, "gold": 6 } },
+    { "name": "Неурожайная зима",   "fields": 4, "need": { "food": 30 } },
+    { "name": "Войско барона",      "fields": 4, "need": { "force": 25, "gold": 15 } },
+    { "name": "Мор и голод",        "fields": 4, "need": { "food": 40, "gold": 22 } },
+    { "name": "Осада короля",       "fields": 4, "need": { "force": 42, "gold": 32, "food": 25 } }
+  ]
+}

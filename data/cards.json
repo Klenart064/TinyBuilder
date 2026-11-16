@@ -1,0 +1,28 @@
+{
+  "_help": "Здания и стартовая колода. yield — базовый доход здания без комбо (сейчас у всех пусто: ресурсы дают только комбо; можно вернуть, например \"yield\": { \"food\": 1 }). shape: box, flat, house, tower, mill, rock. color — цвет кубика.",
+  "resources": {
+    "food":  { "name": "Еда",    "short": "еды",    "color": "#8bc34a", "icon": "res://assets/icons/food.svg" },
+    "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757", "icon": "res://assets/icons/force.svg" },
+    "gold":  { "name": "Золото", "short": "золота", "color": "#f2c94c", "icon": "res://assets/icons/gold.svg" }
+  },
+  "buildings": {
+    "house":    { "name": "Домик",    "resource": "food",  "yield": {},  "shape": "house", "color": "#d9a066", "height": 0.45 },
+    "field":    { "name": "Поле",     "resource": "food",  "yield": {},  "shape": "flat",  "color": "#e3cf57", "height": 0.08 },
+    "mill":     { "name": "Мельница", "resource": "food",  "yield": {},             "shape": "mill",  "color": "#c8b8a0", "height": 0.9 },
+
+    "barracks": { "name": "Казармы",  "resource": "force", "yield": {}, "shape": "box",   "color": "#a33b3b", "height": 0.5 },
+    "tower":    { "name": "Башня",    "resource": "force", "yield": {}, "shape": "tower", "color": "#8c8c9c", "height": 1.1 },
+    "wall":     { "name": "Стена",    "resource": "force", "yield": {}, "shape": "box",   "color": "#9a9a9a", "height": 0.35 },
+
+    "mine":     { "name": "Рудник",   "resource": "gold",  "yield": {},  "shape": "box",   "color": "#5c4a3a", "height": 0.3 },
+    "smithy":   { "name": "Кузница",  "resource": "gold",  "yield": {},  "shape": "box",   "color": "#4a4a55", "height": 0.55 },
+    "market":   { "name": "Рынок",    "resource": "gold",  "yield": {},  "shape": "box"  , "color": "#e0a030", "height": 0.35 },
+
+    "rock":     { "name": "Скала",    "blocked": true,     "yield": {},             "shape": "rock",  "color": "#6f6f6f", "height": 0.5 }
+  },
+  "starter_deck": {
+    "house": 3, "field": 4, "mill": 1,
+    "barracks": 2, "tower": 2, "wall": 2,
+    "mine": 2, "smithy": 1, "market": 2
+  }
+}
