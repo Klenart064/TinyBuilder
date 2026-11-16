@@ -1098,7 +1098,7 @@ func _refresh_ui() -> void:
 	_refresh_hand()
 	_refresh_hint()
 	undo_btn.disabled = not run.can_undo() or busy
-	var last: bool = run.turn >= int(data.run["turns_per_field"])
+	var last: bool = run.turn >= run.turns_here()
 	end_btn.text = "%s\n(Пробел)" % ("Ход земли и итог" if last else "Ход земли")
 	end_btn.disabled = busy or run.game_over or run.phase != "island"
 	claim_btn.visible = not run.game_over and run.phase == "island" and run.task_done()
@@ -1115,7 +1115,7 @@ func _refresh_info() -> void:
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(gap)
-	head.add_child(_label("Ход %d/%d" % [run.turn, int(data.run["turns_per_field"])], 24, LAND_COLOR))
+	head.add_child(_label("Ход %d/%d" % [run.turn, run.turns_here()], 24, LAND_COLOR))
 	info_box.add_child(head)
 
 	# Жизни: полупрозрачные сердца — столько снимет текущее недовольство
@@ -1153,18 +1153,28 @@ func _refresh_info() -> void:
 		if ok:
 			tb.add_child(_rich_line("[color=#6fcf97]Готово! Можно забрать остров (Enter)[/color]", 14))
 
+	# Кузница: рецепт из соседей Наковальни
+	if run.island.has("forge"):
+		var rp: Array = run.field.recipe_progress(data, run.island["forge"])
+		var fb := _section(info_box, "Кузница: сталь для босса", Color("#ff9f43"), 17)
+		fb.get_parent().tooltip_text = "Соберите рецепт из зданий вокруг Наковальни к концу острова — получите сталь. Босс с ней требует ×%s." % str(data.run.get("steel_boss_mult", 0.85))
+		fb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
+		fb.add_child(_rich_line("%s рядом с Наковальней: [b]%d/%d[/b]%s" % [_recipe_text(run.island["forge"]), rp[0], rp[1], "  [color=#6fcf97]✔[/color]" if rp[0] >= rp[1] else ""], 15))
+
 	# Босс на этом острове или впереди
 	if run.is_boss():
 		var b: Dictionary = run.island["boss"]
 		var bb := _section(info_box, "Босс: %s" % b["name"], Color("#eb5757"), 19)
 		bb.get_parent().tooltip_text = "Нужно произвести на этом острове столько всего (любые ресурсы и джокеры). Каждая недостающая единица — минус жизнь."
 		bb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-		bb.add_child(_progress_row("wild", run.sum_res(run.income(sc)), int(b["need"]), " всего"))
+		bb.add_child(_progress_row("wild", run.sum_res(run.income(sc)), run.boss_need(), " всего"))
+		if run.steel > 0:
+			bb.add_child(_rich_line("[color=#ff9f43]Сталь: требование ×%s (было %d)[/color]" % [str(data.run.get("steel_boss_mult", 0.85)), int(b["need"])], 13))
 	else:
 		var nb: Dictionary = run.next_boss()
 		if not nb.is_empty():
 			var left := int(nb["islands_left"])
-			info_box.add_child(_rich_line("[color=#eb5757]%s[/color] через %d %s: нужно [b]%d[/b] за остров" % [nb["name"], left, _plural(left, "остров", "острова", "островов"), int(nb["need"])], 14))
+			info_box.add_child(_rich_line("[color=#eb5757]%s[/color] через %d %s: нужно [b]%d[/b] за остров" % [nb["name"], left, _plural(left, "остров", "острова", "островов"), run.boss_need(nb)], 14))
 
 	# Контракт с рынка
 	if not run.contract.is_empty() and int(run.contract["sprint"]) == run.sprint:
@@ -1174,6 +1184,12 @@ func _refresh_info() -> void:
 		cb.get_parent().tooltip_text = "Взят на рынке: произвести за этот спринт. Награда — на следующем рынке."
 		cb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 		cb.add_child(_progress_row(c["res"], have, int(c["amount"])))
+
+
+func _recipe_text(recipe: String) -> String:
+	if recipe == "colors3":
+		return "3 цвета (%s%s%s)" % [_img("food", 16), _img("gold", 16), _img("force", 16)]
+	return "2 золотых здания %s" % _img("gold", 16)
 
 
 ## Награда текстом с иконками, без цвета (для заголовков-лейблов).
@@ -1200,6 +1216,8 @@ func _refresh_treasury() -> void:
 		if inc > 0:
 			chip.add_child(_label("+%d" % inc, 18, Color("#6fcf97")))
 		treasury_box.add_child(chip)
+	if run.steel > 0:
+		treasury_box.add_child(_label("Сталь %d" % run.steel, 24, Color("#ff9f43")))
 	var joy := int(sc.get("joy", 0))
 	if joy > 0:
 		var j := HBoxContainer.new()
@@ -1240,6 +1258,7 @@ func _refresh_side() -> void:
 	var t := ""
 	t += "[color=#5fe3ff][b]Эхо[/b][/color] — навык карты с рынка: при постройке здания вокруг срабатывают ещё раз, доход сразу в казну. I — соседи, II — волна на 2 шага по связкам, III — вся связанная сеть.\n"
 	t += "[color=#f2c94c]Уровни зданий[/color] (пристройки на модели): добыча — мастерские своего цвета, гора/озеро, плодородная земля; мастерская — добыча своего цвета; жильё — здания рядом; Рынок — цвета рядом; Таверна — жильё рядом.\n"
+	t += "[color=#ff9f43][b]Кузница[/b][/color] (1 остров на спринт): соберите рецепт из соседей Наковальни — сталь; босс со сталью требует ×0,85.\n"
 	t += "[b]Гора[/b]: Шахтам рядом +2%s. [b]Озеро[/b]: Полю и Мельнице рядом +1%s.\n" % [_img("gold", 14), _img("food", 14)]
 	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
 	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
@@ -1337,6 +1356,8 @@ func _card_title(id: String) -> String:
 
 
 func _title_color(id: String) -> Color:
+	if data.is_weak(id):
+		return Color("#9aa4ae")
 	if data.echo_level(id) > 0:
 		return ECHO_COLOR
 	return Color("#f2c94c") if data.is_upgraded(id) else Color.WHITE
@@ -1648,6 +1669,10 @@ func _show_field_result(res: Dictionary) -> void:
 			s += "[color=#6fcf97]Задание выполнено:[/color] %s\n" % _fmt(isl.get("task_reward", {}), true)
 		else:
 			s += "[color=#a9b4c0]Задание не выполнено — без награды[/color]\n"
+	if res.has("forge"):
+		s += ("[color=#ff9f43]Кузница: рецепт собран — +1 сталь для босса[/color]\n" if res["steel"] else "[color=#a9b4c0]Кузница: рецепт не собран[/color]\n")
+	if res.get("steel_used", false):
+		s += "[color=#ff9f43]Сталь потрачена: требование босса снижено[/color]\n"
 	if res["discontent"] > 0:
 		s += "[color=#eb5757]Недовольство: −%d%s[/color]\n" % [res["discontent"], _heart_img()]
 	if res["joy"] > 0:
@@ -1806,6 +1831,17 @@ func _map_node(isl: Dictionary, c: Vector2) -> Button:
 		var tr := _icon_rect(_icon(isl["task"].keys()[0]), 20)
 		tr.position = Vector2(MAP_NODE - 16, -6)
 		b.add_child(tr)
+	var tag := ""
+	if isl.has("forge"):
+		tag = "кузница"
+	elif isl.get("big", false):
+		tag = "4 хода"
+	if tag != "":
+		var tl := _label(tag, 11, Color("#ff9f43") if isl.has("forge") else Color("#8ab4f8"))
+		tl.position = Vector2(4, MAP_NODE - 4)
+		tl.add_theme_constant_override("outline_size", 4)
+		tl.add_theme_color_override("font_outline_color", Color.BLACK)
+		b.add_child(tl)
 	if visited:
 		var v := _label("✔", 18, Color("#6fcf97"))
 		v.position = Vector2(-4, -10)
@@ -1840,10 +1876,14 @@ func _refresh_map_detail() -> void:
 	h.add_child(_mini_field(isl["field"], 24))
 	var t := ""
 	if isl.has("boss"):
-		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПроизведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], int(isl["boss"]["need"]), _heart_img()]
+		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПроизведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], run.boss_need(isl["boss"]), _heart_img()]
 	else:
 		var ev: Dictionary = data.events.get(isl["event"], {"name": "Спокойная земля", "desc": "Земля на этом острове не двигается."})
 		t += "[font_size=20][b][color=%s]%s[/color][/b][/font_size]%s\n[color=#c9d1d9]%s[/color]\n" % [_island_accent(isl).to_html(false), ev["name"], "  [color=#ff8a70]опасно[/color]" if isl.get("danger", false) else "", ev.get("desc", "")]
+	if isl.has("forge"):
+		t += "[color=#ff9f43]Кузница: %s рядом с Наковальней → сталь (босс ×%s)[/color]\n" % [_recipe_text(isl["forge"]), str(data.run.get("steel_boss_mult", 0.85))]
+	if isl.get("big", false):
+		t += "[color=#8ab4f8]Большой остров: %d хода[/color]\n" % int(isl.get("turns", 4))
 	t += "Награда: %s" % (_fmt(isl.get("reward", {}), true) if not isl.get("reward", {}).is_empty() else "нет")
 	if not isl.get("task", {}).is_empty():
 		var tt := ""
@@ -1889,6 +1929,8 @@ func _mini_field(f, cell: int) -> GridContainer:
 			var id: String = f.content[i]
 			if id == "rock":
 				st.bg_color = Color("#8d8d93")
+			elif id == "anvil":
+				st.bg_color = Color("#ff9f43")
 			elif id == "mountain":
 				st.bg_color = Color("#5e5a57")
 				st.border_color = Color("#f2c94c")
@@ -1966,6 +2008,9 @@ func _market_shop() -> void:
 		var tile := _mini_card(id, 1, 200, 96)
 		var bought: bool = run.market["bought"][i]
 		var price: Dictionary = run.buy_price(id)
+		var rep: String = run.buy_replaces(id)
+		if rep != "" and not bought:
+			tile.get_child(0).add_child(_rich_line("[center][color=#a9b4c0]заменит: %s[/color][/center]" % data.obj_name(rep), 13))
 		var btn := _rich_button("Куплено" if bought else "Купить за " + _price_text(price), bought or not run.can_afford(price))
 		btn.pressed.connect(func(): if run.buy(i): _show_market())
 		tile.get_child(0).add_child(btn)
@@ -2008,7 +2053,7 @@ func _market_shop() -> void:
 
 
 func _market_deck() -> void:
-	overlay_body.add_child(_rich_line("[center][color=#a9b4c0]Карта получает либо [color=#f2c94c]+1[/color] к доходу, либо [color=#5fe3ff]Эхо I[/color] (при постройке соседи срабатывают ещё раз). Эхо II — со 2-го рынка. Платится цветом карты.[/color][/center]", 14))
+	overlay_body.add_child(_rich_line("[center][color=#a9b4c0]Слабая карта улучшается до обычной. Обычная получает либо [color=#f2c94c]+1[/color] к доходу, либо [color=#5fe3ff]Эхо I[/color] (при постройке соседи срабатывают ещё раз). Эхо II — со 2-го рынка. Платится цветом карты.[/color][/center]", 14))
 	var grid := GridContainer.new()
 	grid.columns = 7
 	grid.add_theme_constant_override("h_separation", 8)
@@ -2023,8 +2068,8 @@ func _market_deck() -> void:
 		var v: VBoxContainer = tile.get_child(0)
 		if data.can_upgrade(id):
 			var up_price: Dictionary = run.upgrade_price(id)
-			var ub := _rich_button("+1: " + _price_text(up_price, true), not run.can_afford(up_price), 12)
-			ub.tooltip_text = "Станет: " + data.obj_name(id + "+")
+			var ub := _rich_button(("Улучшить: " if data.is_weak(id) else "+1: ") + _price_text(up_price, true), not run.can_afford(up_price), 12)
+			ub.tooltip_text = "Станет: " + data.obj_name(data.upgrade_of(id))
 			ub.pressed.connect(func(): if run.upgrade(id): _show_market())
 			v.add_child(ub)
 		var nx: String = run.echo_next(id)

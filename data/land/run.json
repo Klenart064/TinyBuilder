@@ -1,7 +1,7 @@
 {
   "_help": "Параметры забега живой земли. Диапазоны — [мин, макс] включительно.",
   "lives": 12,
-  "hand_size": 4,
+  "hand_size": 5,
   "plays_per_turn": 2,
   "turns_per_field": 3,
   "_rules_help": "conflict — недовольство за сторону между добычей/мастерскими разных цветов (жильё и городские не ссорятся). Остальные числа карт — в cards.json.",
@@ -14,6 +14,14 @@
   "terrain": [0, 2],
   "terrain_pool": {"fertile_food": 1, "fertile_gold": 1, "fertile_force": 1, "swamp": 1},
   "min_free_cells": 7,
+  "_big_help": "Редкие большие острова: шанс big_chance, форма big_cells клеток, ходов big_turns.",
+  "big_chance": 0.15,
+  "big_cells": [11, 13],
+  "big_turns": 4,
+  "_forge_help": "Острова-кузницы: forges_per_sprint на спринт (не босс). На острове Наковальня; рецепт (один из recipes) собирается из её соседей к концу острова — даёт 1 сталь. Босс тратит сталь: требование ×steel_boss_mult. Рецепты: gold2 — 2 золотых здания рядом (Шахта/Кузница), colors3 — здания 3 разных цветов рядом.",
+  "forges_per_sprint": 1,
+  "forge_recipes": ["gold2", "colors3"],
+  "steel_boss_mult": 0.85,
   "_events_help": "Живая земля: на острове либо спокойно (calm_chance), либо один тип события, который срабатывает после каждого хода. danger — опасные события (рушат постройки): редкие, награда за остров выше.",
   "calm_chance": 0.4,
   "events": [
@@ -63,9 +71,9 @@
   "danger_reward": {"wild": 4},
   "task_chance": 0.6,
   "tasks": [
-    {"from_island": 1, "amount": [4, 5]},
-    {"from_island": 4, "amount": [5, 7]},
-    {"from_island": 8, "amount": [7, 9]}
+    {"from_island": 1, "amount": [2, 3]},
+    {"from_island": 4, "amount": [3, 4]},
+    {"from_island": 8, "amount": [4, 5]}
   ],
   "task_reward": {"wild": 3},
   "danger_task_mult": 2,
@@ -76,27 +84,31 @@
     {"layers": 3},
     {
       "layers": 3,
-      "boss": {"name": "Набег", "need": 22, "life_per_missing": 1}
+      "boss": {"name": "Набег", "need": 24, "life_per_missing": 1}
     },
     {"layers": 3},
     {
       "layers": 3,
-      "boss": {"name": "Осада короля", "need": 30, "life_per_missing": 1, "final": true}
+      "boss": {"name": "Осада короля", "need": 33, "life_per_missing": 1, "final": true}
     }
   ],
   "start_treasury": {"food": 0, "gold": 0, "force": 0, "wild": 0},
   "_market_help": "Рынок в конце спринта. Цены платятся из казны: buy/upgrade — ресурсом цвета карты (жильё и городские — любыми), нехватку закрывают джокеры. remove и heal — любыми ресурсами. contract — необязательное задание на следующий спринт.",
   "market": {
+    "_buy_help": "Покупка заменяет слабую стартовую карту того же здания (если есть), иначе добавляется. В предложении бывают улучшенные (+, шанс offer_upgraded) и с Эхо I (мастерские, шанс offer_echo) — дороже на offer_extra.",
     "buy_offers": 3,
-    "buy_cost": {"base": 5, "workshop": 6, "housing": 6, "city": 7},
-    "upgrade_cost": 10,
-    "remove_cost": 4,
-    "heal_cost": 6,
+    "buy_cost": {"base": 3, "workshop": 4, "housing": 4, "city": 4},
+    "offer_upgraded": 0.3,
+    "offer_echo": 0.25,
+    "offer_extra": 2,
+    "upgrade_cost": 6,
+    "remove_cost": 1,
+    "heal_cost": 4,
     "heal_lives": 2,
     "_echo_help": "Эхо — навык карты: при постройке другие здания срабатывают ещё раз (доход сверх обычного, сразу в казну). I — соседи, II — волна на 2 шага по связкам, III — вся связанная сеть. Эхо I стоит как улучшение (выбор: +1 или Эхо). Эхо II — второй шаг той же карты, со спринта echo2_from_sprint. Эхо III — редкое предложение (шанс echo3_chance, одно на рынок) со спринта echo3_from_sprint.",
-    "echo": {"echo1_cost": 10, "echo2_cost": 12, "echo2_from_sprint": 2, "echo3_cost": 18, "echo3_from_sprint": 3, "echo3_chance": 0.6},
+    "echo": {"echo1_cost": 6, "echo2_cost": 7, "echo2_from_sprint": 2, "echo3_cost": 11, "echo3_from_sprint": 3, "echo3_chance": 0.6},
     "contract": {
-      "amount": [10, 14],
+      "amount": [6, 8],
       "reward": {"wild": 6}
     }
   },

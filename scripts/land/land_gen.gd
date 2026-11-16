@@ -8,8 +8,10 @@ const LandField = preload("res://scripts/land/land_field.gd")
 static func make_field(data, rng: RandomNumberGenerator, index: int) -> Dictionary:
 	var cfg: Dictionary = data.run
 	var field = null
+	var big: bool = rng.randf() < float(cfg.get("big_chance", 0.0))
+	var cells_range: Array = cfg.get("big_cells", cfg["shape_cells"]) if big else cfg["shape_cells"]
 	for _attempt in 30:
-		field = _shape(rng, _rand_range(rng, cfg["shape_cells"]))
+		field = _shape(rng, _rand_range(rng, cells_range))
 		_place_obstacles(field, data, rng)
 		_place_terrain(field, data, rng)
 		if field.free_cells().size() >= int(cfg.get("min_free_cells", 6)):
@@ -24,7 +26,32 @@ static func make_field(data, rng: RandomNumberGenerator, index: int) -> Dictiona
 	if danger:
 		for r in task_reward:
 			task_reward[r] = int(task_reward[r]) * int(cfg.get("danger_task_mult", 2))
-	return {"field": field, "event": ev, "task": task, "danger": danger, "reward": reward, "task_reward": task_reward}
+	var turns := int(cfg.get("big_turns", 4)) if big else int(cfg["turns_per_field"])
+	return {"field": field, "event": ev, "task": task, "danger": danger, "reward": reward, "task_reward": task_reward, "big": big, "turns": turns}
+
+
+## Сделать остров кузницей: Наковальня на свободной клетке с наибольшим числом соседей-суши, случайный рецепт.
+static func add_forge(isl: Dictionary, data, rng: RandomNumberGenerator) -> void:
+	var f = isl["field"]
+	var best := -1
+	var best_n := -1
+	var cells: Array = f.free_cells()
+	_shuffle(cells, rng)
+	for c in cells:
+		var n := 0
+		for j in f.neighbors(c):
+			if f.is_free(j):
+				n += 1
+		if n > best_n:
+			best_n = n
+			best = c
+	if best < 0:
+		return
+	f.content[best] = "anvil"
+	f.prebuilt[best] = true
+	f.terrain[best] = ""
+	var recipes: Array = data.run.get("forge_recipes", ["gold2"])
+	isl["forge"] = recipes[rng.randi_range(0, recipes.size() - 1)]
 
 
 ## Связный кусок из n клеток в рамке 4×4 (растёт от случайной клетки).

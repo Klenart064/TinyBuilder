@@ -49,6 +49,8 @@ var victory := false
 
 ## Доход острова от Эхо (сверх обычного, уже лежит в казне)
 var echo_gain: Dictionary = {}
+## Сталь с островов-кузниц: босс тратит одну и требует меньше
+var steel := 0
 
 var _history: Array = []
 
@@ -82,6 +84,7 @@ func start(data_, seed: int = -1) -> void:
 	plays_left = 0
 	phase = "map"
 	pos_lane = -1
+	steel = 0
 	_gen_map()
 	_make_choices()
 
@@ -154,8 +157,22 @@ func _gen_map() -> void:
 					isl["event"] = ""
 					isl["danger"] = false
 					isl["reward"] = s.get("boss_reward", isl["reward"])
+					isl["big"] = false
+					isl["turns"] = int(data.run["turns_per_field"])
 				row.append(isl)
 			layers.append(row)
+		# Острова-кузницы: по forges_per_sprint на спринт среди обычных островов
+		var pool := []
+		for row in layers:
+			for isl in row:
+				if not isl.has("boss"):
+					pool.append(isl)
+		for _k in int(data.run.get("forges_per_sprint", 0)):
+			if pool.is_empty():
+				break
+			var fi := rng.randi_range(0, pool.size() - 1)
+			LandGen.add_forge(pool[fi], data, rng)
+			pool.remove_at(fi)
 		# Связи между шагами: соседние дорожки, у каждого острова 1–2 выхода, у каждого есть вход
 		for li in layers.size() - 1:
 			var cur: Array = layers[li]
@@ -221,6 +238,21 @@ func choose_island(i: int) -> void:
 	_history.clear()
 	intent = LandEvents.plan(event_type, field, data, rng)
 	phase = "island"
+
+
+## Ходов на этом острове (большие — больше).
+func turns_here() -> int:
+	return int(island.get("turns", data.run["turns_per_field"]))
+
+
+## Требование босса с учётом стали.
+func boss_need(b: Dictionary = {}) -> int:
+	if b.is_empty():
+		b = island.get("boss", {})
+	var n := int(b.get("need", 0))
+	if steel > 0:
+		n = int(ceil(n * float(data.run.get("steel_boss_mult", 1.0))))
+	return n
 
 
 func event_info() -> Dictionary:
@@ -298,7 +330,7 @@ func end_turn() -> Dictionary:
 	var land: Dictionary = LandEvents.apply(intent, field, data)
 	_history.clear()
 	var out := {"land": land, "field_done": false}
-	if turn >= int(data.run["turns_per_field"]):
+	if turn >= turns_here():
 		out["field_done"] = true
 		out["result"] = _finish_field()
 		return out
@@ -371,9 +403,18 @@ func _finish_field() -> Dictionary:
 	var lost := int(sc["discontent"])
 	res["discontent"] = int(sc["discontent"])
 	res["joy"] = int(sc.get("joy", 0))
+	if island.has("forge"):
+		res["forge"] = island["forge"]
+		res["steel"] = field.recipe_met(data, island["forge"])
+		if res["steel"]:
+			steel += 1
 	if is_boss():
-		var b: Dictionary = island["boss"]
+		var b: Dictionary = island["boss"].duplicate()
 		var total := sum_res(prod)
+		b["need"] = boss_need(b)
+		res["steel_used"] = steel > 0
+		if steel > 0:
+			steel -= 1
 		res["boss"] = b
 		res["boss_total"] = total
 		res["boss_missing"] = maxi(0, int(b["need"]) - total)
@@ -431,8 +472,14 @@ func _make_market() -> void:
 		if pool.is_empty():
 			break
 		var i := rng.randi_range(0, pool.size() - 1)
-		buy.append(pool[i])
+		var id: String = pool[i]
 		pool.remove_at(i)
+		var roll := rng.randf()
+		if data.role(id) == "workshop" and roll < float(market_cfg().get("offer_echo", 0.0)):
+			id = id + "*1"
+		elif roll > 1.0 - float(market_cfg().get("offer_upgraded", 0.0)) and data.objects.has(id + "+"):
+			id = id + "+"
+		buy.append(id)
 	var cc: Dictionary = market_cfg().get("contract", {})
 	var colors: Array = data.colors
 	var con := {"res": colors[rng.randi_range(0, colors.size() - 1)],
@@ -503,8 +550,16 @@ func buy_echo3() -> bool:
 ## Цена карты на рынке: {res: n}; у жилья и городских — {"any": n}.
 func buy_price(id: String) -> Dictionary:
 	var n := int(market_cfg()["buy_cost"].get(data.role(id), 4))
+	if data.is_upgraded(id) or data.echo_level(id) > 0:
+		n += int(market_cfg().get("offer_extra", 2))
 	var c: String = data.color_of(id)
 	return {c: n} if data.colors.has(c) else {"any": n}
+
+
+## Какую слабую карту заменит покупка ("" — карта добавится).
+func buy_replaces(id: String) -> String:
+	var weak: String = data.base_id(id) + "-"
+	return weak if weak in all_cards() else ""
 
 
 func upgrade_price(id: String) -> Dictionary:
@@ -565,7 +620,11 @@ func buy(i: int) -> bool:
 	var id: String = market["buy"][i]
 	if not _spend(buy_price(id)):
 		return false
-	deck.add_card(id)
+	var weak := buy_replaces(id)
+	if weak != "":
+		_replace_card(weak, id)
+	else:
+		deck.add_card(id)
 	market["bought"][i] = true
 	return true
 
@@ -580,7 +639,7 @@ func upgrade(id: String) -> bool:
 		return false
 	if not _spend(upgrade_price(id)):
 		return false
-	_replace_card(id, id + "+")
+	_replace_card(id, data.upgrade_of(id))
 	return true
 
 

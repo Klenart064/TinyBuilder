@@ -51,8 +51,10 @@ static func value(run, f, gain: Dictionary) -> float:
 			rew += int(run.island["task_reward"][r])
 		v += float(rew) * 1.3 if short == 0 else -0.3 * float(short)
 	if run.is_boss():
-		var miss := maxi(0, int(run.island["boss"]["need"]) - run.sum_res(have))
+		var miss := maxi(0, run.boss_need() - run.sum_res(have))
 		v -= 3.5 * float(miss)
+	if run.island.has("forge") and g.recipe_met(run.data, run.island["forge"]):
+		v += 5.0
 	v -= 3.5 * float(sc["discontent"])
 	v += 3.0 * float(mini(int(sc.get("joy", 0)), int(run.data.run["lives"]) - run.lives))
 	return v
@@ -72,6 +74,10 @@ static func pick_island(run, smart: bool = true) -> int:
 		if not isl.get("task", {}).is_empty():
 			for r in isl.get("task_reward", {}):
 				v += 0.6 * float(isl["task_reward"][r])
+		if isl.has("forge") and run.steel == 0:
+			v += 3.0
+		if isl.get("big", false):
+			v += 2.0
 		var ev: String = isl.get("event", "")
 		if ev != "":
 			v -= 1.0

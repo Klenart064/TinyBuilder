@@ -26,6 +26,7 @@ func _initialize() -> void:
 	test_finish_early()
 	test_treasury()
 	test_echo()
+	test_forge()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -154,7 +155,9 @@ func test_generation() -> void:
 		var fd: Dictionary = LandGen.make_field(data, rng, 1 + s % 12)
 		var f = fd["field"]
 		var n: int = f.cell_count()
-		if n < 8 or n > 10 or not f.is_contiguous() or f.free_cells().size() < 6:
+		var lo := 11 if fd["big"] else 8
+		var hi := 13 if fd["big"] else 10
+		if n < lo or n > hi or fd["turns"] != (4 if fd["big"] else 3) or not f.is_contiguous() or f.free_cells().size() < 6:
 			bad += 1
 		if fd["event"] == "":
 			calm += 1
@@ -166,7 +169,7 @@ func test_generation() -> void:
 			tasks += 1
 			if fd["task"].size() != 1:
 				bad += 1
-	_check(bad == 0, "300 полей: 8–10 клеток, связные, свободных ≥6, опасные с повышенной наградой (плохих: %d)" % bad)
+	_check(bad == 0, "300 полей: 8–10 клеток (большие 11–13, 4 хода), связные, свободных ≥6, опасные с повышенной наградой (плохих: %d)" % bad)
 	_check(calm > 60 and danger < calm and danger > 0, "спокойных островов много (%d), опасных мало (%d)" % [calm, danger])
 	_check(tasks > 100 and tasks < 300, "задания не на каждом острове (%d из 300)" % tasks)
 
@@ -204,11 +207,11 @@ func test_run_flow() -> void:
 	run.choose_island(1)
 	_check(run.deck.discard_pile.is_empty() and run.deck.draw_pile.size() + run.hand.size() == run.all_cards().size(), "на острове колода собрана заново и перемешана")
 	var from: Dictionary = run.island
-	_check(run.phase == "island" and run.hand.size() == 4 and run.turn == 1 and run.field_index == 1, "остров выбран: рука 4, ход 1")
+	_check(run.phase == "island" and run.hand.size() == 5 and run.turn == 1 and run.field_index == 1, "остров выбран: рука 5, ход 1")
 	var ev := run.event_type
 	LandBot.play_turn(run)
 	var r: Dictionary = run.end_turn()
-	_check(r.has("land") and run.turn == 2 and run.hand.size() == 4, "после хода земли — ход 2, рука снова 4")
+	_check(r.has("land") and run.turn == 2 and run.hand.size() == 5, "после хода земли — ход 2, рука снова 5")
 	_check(run.event_type == ev, "тип события острова не меняется")
 	run.end_turn()
 	var stock_before: Dictionary = run.stock.duplicate()
@@ -219,7 +222,7 @@ func test_run_flow() -> void:
 		if not (int(isl["lane"]) in from["next"]):
 			lanes_ok = false
 	run.choose_island(0)
-	_check(run.deck.discard_pile.is_empty() and run.all_cards().size() == 20, "следующий остров снова с полной колодой")
+	_check(run.deck.discard_pile.is_empty() and run.all_cards().size() == 15, "следующий остров снова с полной колодой")
 	_check(r["field_done"] and lanes_ok, "после 3 ходов — карта, доступны только связанные острова")
 	var ok := true
 	for res in prod:
@@ -288,23 +291,30 @@ func test_treasury() -> void:
 	run.start(data, 4)
 	run.phase = "market"
 	run._make_market()
-	var id: String = run.market["buy"][0]
+	_check(run.all_cards().size() == 15 and "field-" in run.all_cards() and not ("field" in run.all_cards()), "стартовая колода: 15 слабых карт")
+	run.market["buy"] = ["mill", "manor", "tower+"]
+	run.market["bought"] = [false, false, false]
 	run.stock = data.zero_res()
 	_check(not run.buy(0), "без денег не купить")
-	run.stock = {"food": 0, "gold": 0, "force": 0, "wild": 20}
+	run.stock = {"food": 0, "gold": 0, "force": 0, "wild": 30}
 	var n: int = run.all_cards().size()
-	_check(run.buy(0) and run.all_cards().size() == n + 1 and id in run.all_cards(), "покупка добавляет карту в колоду")
+	_check(run.buy(0) and run.all_cards().size() == n and "mill" in run.all_cards() and run.all_cards().count("mill-") == 1, "покупка Мельницы заменяет слабую Мельницу")
+	_check(run.buy(1) and run.all_cards().size() == n + 1, "Усадьба (нет слабой) добавляется")
+	_check(int(run.buy_price("tower+")["force"]) == int(run.buy_price("tower")["force"]) + int(data.run["market"]["offer_extra"]), "улучшенная карта на рынке дороже")
 	_check(not run.buy(0), "одну карту не купить дважды")
 	run.stock = {"food": 20, "gold": 0, "force": 0, "wild": 0}
-	_check(run.upgrade("field") and "field+" in run.all_cards() and run.stock["food"] == 20 - int(data.run["market"]["upgrade_cost"]), "улучшение Поля платится едой")
+	_check(run.upgrade("field-") and "field" in run.all_cards() and run.stock["food"] == 20 - int(data.run["market"]["upgrade_cost"]), "слабое Поле улучшается до обычного (платится едой)")
+	_check(run.upgrade("field") and "field+" in run.all_cards(), "обычное Поле — до Поле+")
 	_check(run.all_cards().size() == n + 1, "улучшение заменяет карту, а не добавляет")
-	_check(not run.upgrade("field+"), "улучшенное не улучшить второй раз")
+	_check(not run.upgrade("field+") and data.echo_next("field-") == "", "Поле+ дальше не улучшить; у слабой карты нет Эхо")
 	var f := _square()
 	f.place_building(data, 4, "field+")
-	_check(int(f.score(data)["total"]["food"]) == 3, "Поле+ даёт +3")
-	var before := run.all_cards().count("mine")
+	f.place_building(data, 0, "field-")
+	f.place_building(data, 8, "mill-")
+	_check(int(f.score(data)["total"]["food"]) == 3 + 1 + 0 + 1, "Поле+ +3, слабое Поле +1, слабая Мельница 0 и +1 за добычу")
+	var before := run.all_cards().count("mine-")
 	run.stock = {"food": 0, "gold": 5, "force": 5, "wild": 0}
-	_check(run.remove("mine") and run.all_cards().count("mine") == before - 1, "удаление карты")
+	_check(run.remove("mine-") and run.all_cards().count("mine-") == before - 1, "удаление карты")
 	run.lives = 5
 	run.stock = {"food": 10, "gold": 0, "force": 0, "wild": 0}
 	_check(run.heal() and run.lives == 5 + int(data.run["market"]["heal_lives"]), "лечение")
@@ -386,6 +396,32 @@ func test_echo() -> void:
 	_check(not data.can_upgrade("mill*2") and run.echo_next("mill*2") == "", "Эхо III только редким предложением")
 	run.market["echo3"] = "mill"
 	_check(run.buy_echo3() and "mill*3" in run.all_cards() and not ("mill*2" in run.all_cards()), "редкое Эхо III улучшает карту с Эхо")
+
+
+func test_forge() -> void:
+	var run := LandRun.new()
+	run.start(data, 8)
+	var forges := 0
+	for sp in run.run_map:
+		var n := 0
+		for row in sp:
+			for isl in row:
+				if isl.has("forge"):
+					n += 1
+					_check(isl["field"].content.has("anvil") and not isl.has("boss"), "у кузницы есть Наковальня, кузница не на боссе")
+		if n == 1:
+			forges += 1
+	_check(forges == 4, "по одной кузнице на спринт")
+	var f := _square()
+	f.content[4] = "anvil"
+	_check(not f.recipe_met(data, "gold2"), "без зданий рецепт не собран")
+	f.place_building(data, 0, "mine")
+	f.place_building(data, 5, "smithy-")
+	_check(f.recipe_met(data, "gold2") and not f.recipe_met(data, "colors3"), "рецепт «2 золотых»: Шахта и Кузница рядом")
+	f.place_building(data, 8, "field")
+	_check(f.recipe_progress(data, "colors3")[0] == 2, "«3 цвета»: пока 2")
+	run.steel = 1
+	_check(run.boss_need({"need": 24}) == 21, "сталь снижает босса 24 → 21 (×0,85)")
 
 
 func _check(ok: bool, name: String) -> void:

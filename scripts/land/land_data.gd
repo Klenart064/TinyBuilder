@@ -27,12 +27,25 @@ func load_all(dir: String = "res://data/land") -> bool:
 		if o.has("upgrade"):
 			var up: Dictionary = o.duplicate(true)
 			up.erase("upgrade")
+			up.erase("weak")
 			for k in o["upgrade"]:
 				up[k] = o["upgrade"][k]
 			up["name"] = o["name"] + "+"
 			up["upgraded"] = true
 			up["base_id"] = id
 			objects[id + "+"] = up
+	# Слабые стартовые карты: «field-» — копия «field» с числами из weak; улучшение делает её обычной
+	for id in objects.keys():
+		var o: Dictionary = objects[id]
+		if o.has("weak") and not o.has("base_id"):
+			var w: Dictionary = o.duplicate(true)
+			w.erase("upgrade")
+			w.erase("weak")
+			for k in o["weak"]:
+				w[k] = o["weak"][k]
+			w["weak"] = true
+			w["base_id"] = id
+			objects[id + "-"] = w
 	# Эхо: «field*1» … «field*3» — та же карта с навыком Эхо (повторно запускает здания при постройке)
 	for id in objects.keys():
 		var o: Dictionary = objects[id]
@@ -40,6 +53,7 @@ func load_all(dir: String = "res://data/land") -> bool:
 			for n in [1, 2, 3]:
 				var e: Dictionary = o.duplicate(true)
 				e.erase("upgrade")
+				e.erase("weak")
 				e["name"] = "%s · Эхо %s" % [o["name"], ["I", "II", "III"][n - 1]]
 				e["echo"] = n
 				e["base_id"] = id
@@ -124,7 +138,21 @@ func is_upgraded(id: String) -> bool:
 
 
 func can_upgrade(id: String) -> bool:
-	return objects.has(id + "+")
+	return upgrade_of(id) != ""
+
+
+## Во что карта превращается улучшением: слабая → обычная, обычная → «+» ("" — нельзя).
+func upgrade_of(id: String) -> String:
+	if is_weak(id):
+		return base_id(id)
+	if objects.get(id, {}).has("base_id"):
+		return ""
+	return id + "+" if objects.has(id + "+") else ""
+
+
+func is_weak(id: String) -> bool:
+	var w = objects.get(id, {}).get("weak", false)
+	return w is bool and w
 
 
 ## Уровень Эхо карты: 0 — нет.
@@ -136,7 +164,7 @@ func echo_level(id: String) -> int:
 func echo_next(id: String) -> String:
 	var lv := echo_level(id)
 	if lv == 0:
-		return id + "*1" if objects.has(id + "*1") else ""
+		return id + "*1" if objects.has(id + "*1") and not objects[id].has("base_id") else ""
 	if lv == 1:
 		return base_id(id) + "*2"
 	return ""

@@ -22,7 +22,7 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 	var m = new()
 	m.alpha = alpha_
 	m.root = Node3D.new()
-	var bid := id.trim_suffix("+")
+	var bid := id.trim_suffix("+").trim_suffix("-")
 	var echo_lv := 0
 	if bid.contains("*"):
 		echo_lv = int(bid.get_slice("*", 1))
@@ -39,6 +39,7 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 		"market": m._market()
 		"tavern": m._tavern()
 		"mountain": m._mountain()
+		"anvil": m._anvil()
 		_: return null
 	if id.ends_with("+"):
 		m._upgrade_flag()
@@ -68,7 +69,7 @@ static func add_level(root_: Node3D, id: String, level: int, alpha_: float = 1.0
 	m.root = Node3D.new()
 	root_.add_child(m.root)
 	var corners := [Vector3(-0.36, 0, 0.36), Vector3(0.36, 0, 0.36), Vector3(0.36, 0, -0.36), Vector3(-0.36, 0, -0.36)]
-	var bid := id.trim_suffix("+").get_slice("*", 0)
+	var bid := id.trim_suffix("+").trim_suffix("-").get_slice("*", 0)
 	for k in mini(level, 4):
 		var c: Vector3 = corners[k]
 		match bid:
@@ -138,6 +139,16 @@ func _mountain() -> void:
 	cyl(0.0, 0.26, 0.55, Vector3(-0.25, 0.275, 0.22), Color("#6e6b69"), 6)
 	cyl(0.0, 0.08, 0.15, Vector3(-0.25, 0.48, 0.22), Color("#f2f2f2"), 6)
 	box(Vector3(0.05, 0.22, 0.03), Vector3(0.18, 0.25, 0.33), GOLD, Vector3(0, 0, 25), true)
+
+
+## Наковальня острова-кузницы: каменная плита, наковальня, горн с огнём.
+func _anvil() -> void:
+	box(Vector3(0.8, 0.08, 0.8), Vector3(0, 0.04, 0), STONE_DARK)
+	box(Vector3(0.14, 0.18, 0.14), Vector3(0, 0.17, 0), Color("#2e2e33"))
+	box(Vector3(0.42, 0.1, 0.18), Vector3(0, 0.31, 0), Color("#3d3d44"))
+	cyl(0.0, 0.07, 0.16, Vector3(0.27, 0.31, 0), Color("#3d3d44"), 8, Vector3(0, 0, 90))
+	cyl(0.2, 0.22, 0.2, Vector3(-0.22, 0.18, -0.25), STONE, 10)
+	ball(0.1, Vector3(-0.22, 0.3, -0.25), Color("#ff7a2a"), true)
 
 
 ## Улучшенная карта: золотой флажок на углу клетки.

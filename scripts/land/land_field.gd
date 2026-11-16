@@ -131,6 +131,32 @@ func place_building(data, cell: int, id: String) -> Array:
 	return razed
 
 
+## Рецепт кузницы выполнен? Считаются здания-соседи Наковальни (выключенные Логовом не считаются).
+func recipe_met(data, recipe: String) -> bool:
+	return recipe_progress(data, recipe)[0] >= recipe_progress(data, recipe)[1]
+
+
+## [сколько есть, сколько нужно] для рецепта.
+func recipe_progress(data, recipe: String) -> Array:
+	var anvil := content.find("anvil")
+	if anvil < 0:
+		return [0, 1]
+	var disabled := disabled_cells(data)
+	var gold := 0
+	var colors := {}
+	for j in neighbors(anvil):
+		if not exists[j] or not data.is_building(content[j]) or j in disabled:
+			continue
+		var c: String = data.color_of(content[j])
+		if c == "gold":
+			gold += 1
+		if data.is_producer(content[j]):
+			colors[c] = true
+	if recipe == "colors3":
+		return [colors.size(), 3]
+	return [gold, 2]
+
+
 ## Связка между соседними зданиями (для Эхо II/III): добыча — мастерская своего цвета,
 ## две мастерские своего цвета, Домик или Рынок — с любым зданием.
 func linked(data, a: int, b: int) -> bool:

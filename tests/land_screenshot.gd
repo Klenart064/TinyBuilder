@@ -85,6 +85,20 @@ func _run() -> void:
 	await _seconds(0.5)
 	_save("land_echo_anim.png")
 	await _seconds(1.0)
+	# Кузница: Наковальня на свободной клетке, рецепт «2 золотых»
+	var fc: Array = [13]
+	if true:
+		r.field.content[fc[0]] = "anvil"
+		r.island["forge"] = "gold2"
+		r.steel = 1
+		main.selected = -1
+		main.hover = -1
+		main._full_refresh()
+		await _frames(8)
+		_save("land_forge.png")
+		r.island.erase("forge")
+		r.field.content[fc[0]] = "house"
+		r.steel = 0
 	# Итог острова
 	main.selected = -1
 	main.hover = -1

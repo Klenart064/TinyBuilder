@@ -1,5 +1,5 @@
 {
-  "_help": "Объекты живой земли. kind: building — карта игрока; obstacle — препятствие; threat — логово земли. role: base (добыча, даёт base своего цвета), workshop (мастерская: self + per_base за каждую соседнюю добычу своего цвета), housing (жильё: wild джокеров), city (Рынок: per_color за каждый цвет соседей; Таверна: per_housing жизней за соседнее жильё). upgrade — что меняется у улучшенной карты (Поле → Поле+).",
+  "_help": "Объекты живой земли. kind: building — карта игрока; obstacle — препятствие; threat — логово земли. role: base (добыча, даёт base своего цвета), workshop (мастерская: self + per_base за каждую соседнюю добычу своего цвета), housing (жильё: wild джокеров), city (Рынок: per_color за каждый цвет соседей; Таверна: per_housing жизней за соседнее жильё). upgrade — что меняется у улучшенной карты (Поле → Поле+). weak — слабая стартовая версия («field-»).",
   "resources": {
     "food": {"name": "Еда", "short": "еды", "color": "#8bc34a", "icon": "res://assets/icons/food.svg"},
     "gold": {"name": "Золото", "short": "золота", "color": "#f2c94c", "icon": "res://assets/icons/gold.svg"},
@@ -7,12 +7,12 @@
     "wild": {"name": "Джокер", "short": "джокеров", "color": "#c9bff5", "icon": "res://assets/icons/wild.svg", "wild": true}
   },
   "objects": {
-    "field": {"name": "Поле", "acc": "Поле", "kind": "building", "role": "base", "color": "food", "tint": "#e3cf57", "height": 0.35, "base": 2, "upgrade": {"base": 3}},
-    "mine": {"name": "Шахта", "acc": "Шахту", "kind": "building", "role": "base", "color": "gold", "tint": "#6b5640", "height": 0.55, "base": 2, "upgrade": {"base": 3}},
-    "tower": {"name": "Башня", "acc": "Башню", "kind": "building", "role": "base", "color": "force", "tint": "#8c8c9c", "height": 1.55, "base": 2, "upgrade": {"base": 3}},
-    "mill": {"name": "Мельница", "kind": "building", "role": "workshop", "color": "food", "tint": "#c8b8a0", "height": 1.25, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}},
-    "smithy": {"name": "Кузница", "kind": "building", "role": "workshop", "color": "gold", "tint": "#4a4a55", "height": 1.05, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}},
-    "barracks": {"name": "Казарма", "kind": "building", "role": "workshop", "color": "force", "tint": "#a33b3b", "height": 0.95, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}},
+    "field": {"name": "Поле", "acc": "Поле", "kind": "building", "role": "base", "color": "food", "tint": "#e3cf57", "height": 0.35, "base": 2, "upgrade": {"base": 3}, "weak": {"base": 1, "name": "Слабое поле"}},
+    "mine": {"name": "Шахта", "acc": "Шахту", "kind": "building", "role": "base", "color": "gold", "tint": "#6b5640", "height": 0.55, "base": 2, "upgrade": {"base": 3}, "weak": {"base": 1, "name": "Слабая шахта"}},
+    "tower": {"name": "Башня", "acc": "Башню", "kind": "building", "role": "base", "color": "force", "tint": "#8c8c9c", "height": 1.55, "base": 2, "upgrade": {"base": 3}, "weak": {"base": 1, "name": "Слабая башня"}},
+    "mill": {"name": "Мельница", "kind": "building", "role": "workshop", "color": "food", "tint": "#c8b8a0", "height": 1.25, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}, "weak": {"self": 0, "per_base": 1, "name": "Слабая мельница"}},
+    "smithy": {"name": "Кузница", "kind": "building", "role": "workshop", "color": "gold", "tint": "#4a4a55", "height": 1.05, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}, "weak": {"self": 0, "per_base": 1, "name": "Слабая кузница"}},
+    "barracks": {"name": "Казарма", "kind": "building", "role": "workshop", "color": "force", "tint": "#a33b3b", "height": 0.95, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}, "weak": {"self": 0, "per_base": 1, "name": "Слабая казарма"}},
     "house": {"name": "Домик", "kind": "building", "role": "housing", "color": "wild", "wild": 1, "tint": "#d9a066", "height": 0.85, "upgrade": {"wild": 2}},
     "manor": {"name": "Усадьба", "kind": "building", "role": "housing", "color": "wild", "wild": 2, "tint": "#d9a066", "height": 1.0, "upgrade": {"wild": 3}},
     "market": {"name": "Рынок", "kind": "building", "role": "city", "color": "city", "tint": "#b07ad9", "height": 0.8, "per_color": 2, "upgrade": {"per_color": 3}},
@@ -20,6 +20,7 @@
     "rock": {"name": "Камень", "kind": "obstacle", "shape": "rock", "tint": "#6f6f6f", "height": 0.5},
     "lake": {"name": "Озеро", "kind": "obstacle", "shape": "lake", "tint": "#3f86c7", "height": 0.05, "bonus_to_neighbors": {"food": 1}},
     "mountain": {"name": "Гора", "kind": "obstacle", "shape": "mountain", "tint": "#7d7a78", "height": 0.9, "bonus_to_neighbors": {"gold": 2}, "bonus_role": "base", "_help": "Гора: соседние Шахты +2 золота"},
+    "anvil": {"name": "Наковальня", "kind": "special", "shape": "anvil", "tint": "#3d3d44", "height": 0.5, "_help": "Остров-кузница: соберите рецепт из соседей Наковальни — получите сталь"},
     "lair": {"name": "Логово", "kind": "threat", "shape": "lair", "tint": "#3a2a3f", "height": 0.9}
   },
   "_terrain_help": "Местность под клеткой. bonus — сколько добавляется зданию добычи или мастерской своего цвета (color) или любого цвета (color: any).",
@@ -29,5 +30,6 @@
     "fertile_force": {"name": "Холм", "color": "force", "bonus": 1, "tint": "#8a6a5a"},
     "swamp": {"name": "Болото", "color": "any", "bonus": -1, "tint": "#3f4a33"}
   },
-  "starter_deck": {"field": 3, "mine": 3, "tower": 3, "mill": 2, "smithy": 2, "barracks": 2, "house": 2, "manor": 1, "market": 1, "tavern": 1}
+  "_starter_help": "Стартовая колода: 15 слабых карт («field-» — слабая версия Поля из weak). Улучшение слабой карты делает её обычной, покупка на рынке заменяет слабую карту того же здания.",
+  "starter_deck": {"field-": 2, "mine-": 2, "tower-": 2, "mill-": 2, "smithy-": 2, "barracks-": 2, "house": 2, "market": 1}
 }

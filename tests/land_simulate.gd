@@ -28,6 +28,7 @@ func _initialize() -> void:
 		var boss_total := {}
 		var upgrades := 0
 		var echoes := [0, 0, 0, 0]
+		var steel := [0, 0, 0]
 		var deck_size := 0
 		var reached := {}
 		for s in runs:
@@ -64,6 +65,12 @@ func _initialize() -> void:
 					p += int(res["prod"][k])
 				prod_by_sprint[sp] = prod_by_sprint.get(sp, 0) + p
 				cnt_by_sprint[sp] = cnt_by_sprint.get(sp, 0) + 1
+				if res.has("forge"):
+					steel[0] += 1
+					if res["steel"]:
+						steel[1] += 1
+				if res.get("steel_used", false):
+					steel[2] += 1
 				if res.has("boss"):
 					var bt: Array = boss_total.get(res["boss"]["name"], [0, 0, 0])
 					bt[0] += res["boss_total"]
@@ -91,6 +98,7 @@ func _initialize() -> void:
 			print("Босс «%s»: в среднем %.1f, без потерь %d%%" % [b, float(bt[0]) / bt[1], 100 * bt[2] / bt[1]])
 		print("Потери жизней за остров: недовольство %.2f; за забег боссы %.2f; таверна +%.2f за остров" % [
 			float(loss["discontent"]) / fields, float(loss["boss"]) / runs, float(joy) / fields])
+		print("Кузницы: посещено %d, сталь получена %d, потрачена на боссов %d" % steel)
 		print("Задания: %d/%d, контракты: %d/%d" % [tasks[0], tasks[1], contracts[0], contracts[1]])
 		print("В конце: колода %.1f карт, улучшено %.1f, Эхо I/II/III: %.1f / %.1f / %.1f" % [float(deck_size) / runs, float(upgrades) / runs, float(echoes[1]) / runs, float(echoes[2]) / runs, float(echoes[3]) / runs])
 		var keys := reached.keys()
