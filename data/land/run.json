@@ -59,15 +59,15 @@
     }
   ],
   "_islands_help": "Награда за прохождение острова (в казну). Опасный остров — danger_reward. Задание острова (с шансом task_chance): произвести на острове amount одного цвета; награда task_reward (на опасном острове ×danger_task_mult).",
-  "island_reward": {"wild": 1},
-  "danger_reward": {"wild": 4},
+  "island_reward": {"wild": 2},
+  "danger_reward": {"wild": 7},
   "task_chance": 0.6,
   "tasks": [
-    {"from_island": 1, "amount": [4, 5]},
-    {"from_island": 4, "amount": [5, 7]},
-    {"from_island": 8, "amount": [7, 9]}
+    {"from_island": 1, "amount": [7, 9]},
+    {"from_island": 4, "amount": [9, 12]},
+    {"from_island": 8, "amount": [12, 15]}
   ],
-  "task_reward": {"wild": 3},
+  "task_reward": {"wild": 5},
   "danger_task_mult": 2,
   "_sprints_help": "Забег: спринты по layers островов, на каждом шаге выбор из choices островов. boss — последний остров спринта: на нём нужно произвести need ресурсов всего (джокеры тоже считаются); каждая недостающая единица — life_per_missing жизней. После спринта — рынок.",
   "_lanes_help": "Карта забега: сколько дорожек (островов на шаге). Из острова можно пойти на свою или соседнюю дорожку.",
@@ -76,26 +76,26 @@
     {"layers": 3},
     {
       "layers": 3,
-      "boss": {"name": "Набег", "need": 20, "life_per_missing": 1}
+      "boss": {"name": "Набег", "need": 28, "life_per_missing": 1}
     },
     {"layers": 3},
     {
       "layers": 3,
-      "boss": {"name": "Осада короля", "need": 28, "life_per_missing": 1, "final": true}
+      "boss": {"name": "Осада короля", "need": 40, "life_per_missing": 1, "final": true}
     }
   ],
   "start_treasury": {"food": 0, "gold": 0, "force": 0, "wild": 0},
   "_market_help": "Рынок в конце спринта. Цены платятся из казны: buy/upgrade — ресурсом цвета карты (жильё и городские — любыми), нехватку закрывают джокеры. remove и heal — любыми ресурсами. contract — необязательное задание на следующий спринт.",
   "market": {
     "buy_offers": 3,
-    "buy_cost": {"base": 5, "workshop": 6, "housing": 6, "city": 7},
-    "upgrade_cost": 10,
-    "remove_cost": 4,
-    "heal_cost": 6,
+    "buy_cost": {"base": 8, "workshop": 10, "housing": 10, "city": 12},
+    "upgrade_cost": 17,
+    "remove_cost": 7,
+    "heal_cost": 10,
     "heal_lives": 2,
     "contract": {
-      "amount": [10, 14],
-      "reward": {"wild": 6}
+      "amount": [18, 24],
+      "reward": {"wild": 10}
     }
   },
   "buy_pool": ["field", "mine", "tower", "mill", "smithy", "barracks", "house", "manor", "market", "tavern"]

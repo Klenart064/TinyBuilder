@@ -13,13 +13,14 @@ static func play_turn(run, smart: bool = true) -> void:
 		if not smart:
 			run.place(run.rng.randi_range(0, run.hand.size() - 1), free[run.rng.randi_range(0, free.size() - 1)])
 			continue
-		var best_v := value(run, run.field)
+		var best_v := value(run, run.field, {})
 		var best := []
 		for h in run.hand.size():
 			for c in free:
 				var f = run.field.clone()
 				f.place_building(run.data, c, run.hand[h])
-				var v := value(run, f)
+				var gain: Dictionary = f.cascade_total(f.cascade(run.data, c))
+				var v := value(run, f, gain)
 				if v > best_v + 0.001:
 					best_v = v
 					best = [h, c]
@@ -28,25 +29,33 @@ static func play_turn(run, smart: bool = true) -> void:
 		run.place(best[0], best[1])
 
 
-## Оценка поля после хода земли: доход в казну, задание, босс, недовольство.
-static func value(run, f) -> float:
+## Оценка: доход каскада сейчас + потенциал поля (будущие каскады), задание, босс, недовольство.
+static func value(run, f, gain: Dictionary) -> float:
 	var g = f.clone()
 	LandEvents.apply(run.intent, g, run.data)
 	var sc: Dictionary = g.score(run.data)
 	var v := 0.0
+	for r in gain:
+		v += float(gain[r]) * (1.3 if r == "wild" else 1.0)
+	var pot := 0.0
 	for r in sc["total"]:
-		v += float(sc["total"][r]) * (1.3 if r == "wild" else 1.0)
+		pot += float(sc["total"][r])
+	var left := float(int(run.data.run["turns_per_field"]) - run.turn) * 2.0 + float(run.plays_left)
+	v += pot * clampf(left * 0.12, 0.0, 0.6)
+	var have := {}
+	for r in run.earned:
+		have[r] = int(run.earned[r]) + int(gain.get(r, 0))
 	if not run.task.is_empty():
 		var short := 0
 		for r in run.task:
-			short += maxi(0, int(run.task[r]) - int(sc["total"].get(r, 0)))
+			short += maxi(0, int(run.task[r]) - int(have.get(r, 0)))
 		var rew := 0
 		for r in run.island.get("task_reward", {}):
 			rew += int(run.island["task_reward"][r])
-		v += float(rew) * 1.3 if short == 0 else -0.5 * float(short)
+		v += float(rew) * 1.3 if short == 0 else -0.3 * float(short)
 	if run.is_boss():
-		var miss := maxi(0, int(run.island["boss"]["need"]) - run.total_of(sc))
-		v -= 3.5 * float(miss)
+		var miss := maxi(0, int(run.island["boss"]["need"]) - run.sum_res(have))
+		v -= 1.5 * float(miss)
 	v -= 3.5 * float(sc["discontent"])
 	v += 3.0 * float(mini(int(sc.get("joy", 0)), int(run.data.run["lives"]) - run.lives))
 	return v

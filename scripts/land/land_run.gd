@@ -47,6 +47,9 @@ var market: Dictionary = {}
 var game_over := false
 var victory := false
 
+## Доход острова, уже полученный каскадами (лежит в казне)
+var earned: Dictionary = {}
+
 var _history: Array = []
 
 
@@ -209,6 +212,7 @@ func choose_island(i: int) -> void:
 	task = island["task"]
 	deck.discard(hand)
 	hand = deck.draw(int(data.run["hand_size"]))
+	earned = data.zero_res()
 	turn = 1
 	plays_left = int(data.run["plays_per_turn"])
 	_history.clear()
@@ -238,13 +242,18 @@ func can_place(hand_idx: int, cell: int) -> bool:
 func place(hand_idx: int, cell: int) -> Dictionary:
 	if not can_place(hand_idx, cell):
 		return {"ok": false, "razed": []}
-	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left})
+	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "earned": earned.duplicate()})
 	var id: String = hand[hand_idx]
 	hand.remove_at(hand_idx)
 	var razed: Array = field.place_building(data, cell, id)
 	plays_left -= 1
 	deck.discard([id])
-	return {"ok": true, "razed": razed}
+	var steps: Array = field.cascade(data, cell)
+	var gain: Dictionary = LandField.cascade_total(steps)
+	_add_stock(gain)
+	for r in gain:
+		earned[r] = int(earned.get(r, 0)) + int(gain[r])
+	return {"ok": true, "razed": razed, "cascade": steps, "gain": gain}
 
 
 func can_undo() -> bool:
@@ -263,6 +272,8 @@ func undo() -> bool:
 			deck.discard_pile.remove_at(k)
 	hand = h["hand"]
 	plays_left = h["plays"]
+	stock = h["stock"]
+	earned = h["earned"]
 	return true
 
 
@@ -298,13 +309,11 @@ func end_turn() -> Dictionary:
 
 
 ## Задание острова выполнено (произведено на острове сейчас)?
-func task_done(sc: Dictionary = {}) -> bool:
+func task_done(_sc: Dictionary = {}) -> bool:
 	if task.is_empty():
 		return false
-	if sc.is_empty():
-		sc = score()
 	for r in task:
-		if int(sc["total"].get(r, 0)) < int(task[r]):
+		if int(earned.get(r, 0)) < int(task[r]):
 			return false
 	return true
 
@@ -317,12 +326,16 @@ func finish_early() -> Dictionary:
 	return {"land": {}, "field_done": true, "early": true, "result": _finish_field()}
 
 
-## Сколько всего производит остров (джокеры тоже) — для босса.
-static func total_of(sc: Dictionary) -> int:
+## Сколько всего в словаре ресурсов (джокеры тоже) — для босса.
+static func sum_res(d: Dictionary) -> int:
 	var n := 0
-	for r in sc["total"]:
-		n += int(sc["total"][r])
+	for r in d:
+		n += int(d[r])
 	return n
+
+
+func earned_total() -> int:
+	return sum_res(earned)
 
 
 func _add_stock(d: Dictionary) -> void:
@@ -332,9 +345,8 @@ func _add_stock(d: Dictionary) -> void:
 
 func _finish_field() -> Dictionary:
 	var sc: Dictionary = score()
-	var prod: Dictionary = sc["total"]
+	var prod: Dictionary = earned.duplicate()
 	var res := {"prod": prod, "lives_before": lives, "island": island}
-	_add_stock(prod)
 	_add_stock(island.get("reward", {}))
 	res["reward"] = island.get("reward", {})
 	res["task"] = task.duplicate()
@@ -346,7 +358,7 @@ func _finish_field() -> Dictionary:
 	res["joy"] = int(sc.get("joy", 0))
 	if is_boss():
 		var b: Dictionary = island["boss"]
-		var total := total_of(sc)
+		var total := earned_total()
 		res["boss"] = b
 		res["boss_total"] = total
 		res["boss_missing"] = maxi(0, int(b["need"]) - total)

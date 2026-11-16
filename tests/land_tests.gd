@@ -25,6 +25,7 @@ func _initialize() -> void:
 	test_undo()
 	test_finish_early()
 	test_treasury()
+	test_cascade()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -210,7 +211,7 @@ func test_run_flow() -> void:
 	_check(run.event_type == ev, "тип события острова не меняется")
 	run.end_turn()
 	var stock_before: Dictionary = run.stock.duplicate()
-	var prod: Dictionary = run.score()["total"]
+	var prod: Dictionary = run.earned.duplicate()
 	r = run.end_turn()
 	var lanes_ok := run.choices.size() >= 1
 	for isl in run.choices:
@@ -219,9 +220,9 @@ func test_run_flow() -> void:
 	_check(r["field_done"] and run.phase == "map" and lanes_ok, "после 3 ходов — карта, доступны только связанные острова")
 	var ok := true
 	for res in prod:
-		if int(run.stock[res]) < int(stock_before[res]) + int(prod[res]):
+		if int(r["result"]["prod"].get(res, 0)) != int(prod[res]) or int(run.stock[res]) < int(stock_before[res]):
 			ok = false
-	_check(ok, "весь доход острова ушёл в казну, платы нет")
+	_check(ok, "доход острова = полученное каскадами, в конце не начисляется второй раз")
 	# Конец первого спринта — рынок
 	for _k in 2:
 		run.choose_island(0)
@@ -242,7 +243,7 @@ func test_run_flow() -> void:
 	for _t in 2:
 		run.end_turn()
 	var lives := run.lives
-	var need := int(run.island["boss"]["need"]) - run.total_of(run.score())
+	var need := int(run.island["boss"]["need"]) - run.earned_total()
 	r = run.end_turn()
 	_check(r["result"]["boss_missing"] == maxi(0, need), "босс считает весь доход острова (не хватило %d)" % r["result"]["boss_missing"])
 	_check(run.game_over or run.lives <= lives - r["result"]["boss_missing"] + r["result"]["joy"], "нехватка на боссе снимает жизни")
@@ -270,7 +271,9 @@ func test_finish_early() -> void:
 	var res: String = run.task.keys()[0]
 	var base: String = {"food": "field", "gold": "mine", "force": "tower"}[res]
 	for c in f.free_cells():
-		f.place_building(data, c, base)
+		run.hand = [base]
+		run.plays_left = 1
+		run.place(0, c)
 	var wild_before := int(run.stock["wild"])
 	var r2: Dictionary = run.finish_early()
 	_check(r2.get("field_done", false) and r2["result"]["task_done"], "задание выполнено — остров можно забрать")
@@ -318,6 +321,32 @@ func test_undo() -> void:
 	run.undo()
 	_check(run.field.content[cell] == "" and run.hand == before and run.plays_left == 2, "отмена возвращает карту")
 	_check(not (before[0] in run.deck.discard_pile) or run.deck.discard_pile.count(before[0]) == 0, "карта не осталась в сбросе")
+
+
+func test_cascade() -> void:
+	# Пример из дизайна: Мельница даёт 1; Поле рядом: Поле +2, Мельница +3; второе Поле: +2 и Мельница +5
+	var run := LandRun.new()
+	run.start(data, 5)
+	run.choose_island(0)
+	var f := _square()
+	run.field = f
+	run.stock = data.zero_res()
+	run.plays_left = 3
+	run.hand = ["mill", "field", "field"]
+	var r: Dictionary = run.place(0, 5)
+	_check(r["gain"].get("food", 0) == 1 and r["cascade"].size() == 1, "Мельница одна: +1 сразу")
+	r = run.place(0, 4)
+	_check(r["cascade"].size() == 2 and r["gain"].get("food", 0) == 2 + 3, "Поле рядом: Поле +2, Мельница срабатывает ещё раз +3 (%s)" % str(r["gain"]))
+	r = run.place(0, 6)
+	_check(r["gain"].get("food", 0) == 2 + 5, "второе Поле: +2 и Мельница +5 (%s)" % str(r["gain"]))
+	_check(run.stock["food"] == 1 + 5 + 7 and run.earned["food"] == 13, "доход сразу в казне и в доходе острова")
+	run.undo()
+	_check(run.stock["food"] == 6 and run.earned["food"] == 6, "отмена возвращает и казну")
+	f.content[2] = "lair"
+	f.facing[2] = 1
+	var steps: Array = f.cascade(data, 6)
+	var cells := steps.map(func(x): return x["cell"])
+	_check(not (2 in cells) and steps.size() == 1, "выключенное Логовом здание и само Логово не срабатывают (%s)" % str(cells))
 
 
 func _check(ok: bool, name: String) -> void:

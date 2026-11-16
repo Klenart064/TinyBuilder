@@ -131,6 +131,32 @@ func place_building(data, cell: int, id: String) -> Array:
 	return razed
 
 
+## Каскад: доход в момент постройки. Сначала срабатывает новое здание, потом по очереди
+## каждое соседнее здание — ещё раз, со своим текущим доходом (после постройки).
+## Возвращает [{"cell", "yield": {res: n}}] — только сработавшие с ненулевым доходом.
+func cascade(data, cell: int) -> Array:
+	var sc: Dictionary = score(data)
+	var out := []
+	for i in [cell] + neighbors(cell):
+		if i != cell and not (exists[i] and data.is_building(content[i])):
+			continue
+		var y: Dictionary = sc["cells"][i]["yield"]
+		var sum := 0
+		for r in y:
+			sum += int(y[r])
+		if sum > 0:
+			out.append({"cell": i, "yield": y.duplicate()})
+	return out
+
+
+static func cascade_total(steps: Array) -> Dictionary:
+	var t := {}
+	for st in steps:
+		for r in st["yield"]:
+			t[r] = int(t.get(r, 0)) + int(st["yield"][r])
+	return t
+
+
 ## Клетки, выключенные логовами: логово выключает одного соседа, на которого смотрит.
 ## Военные здания (цвет force) логово не выключает.
 func disabled_cells(data) -> Array:

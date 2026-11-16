@@ -72,6 +72,18 @@ func _run() -> void:
 	await _frames(5)
 	_save("land_rules.png")
 	main._toggle_rules()
+	# Каскад: превью и анимация
+	r.hand = ["mill", "field", "mine", "house"]
+	r.plays_left = 2
+	main.selected = 0
+	main.hover = 4
+	main._full_refresh()
+	await _frames(8)
+	_save("land_cascade_preview.png")
+	main._try_place(4)
+	await _seconds(0.5)
+	_save("land_cascade_anim.png")
+	await _seconds(1.0)
 	# Итог острова
 	main.selected = -1
 	main.hover = -1

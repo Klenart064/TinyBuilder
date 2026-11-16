@@ -540,14 +540,14 @@ func _update_hover() -> void:
 	var g = f.clone()
 	var razed: Array = g.place_building(data, hover, card)
 	var after: Dictionary = g.score(data)
-	var d := {}
-	for r in data.resources:
-		var v := int(after["total"].get(r, 0)) - int(before["total"].get(r, 0))
-		if v != 0:
-			d[r] = v
-	var badge := _make_badge(d, 40, Color(1, 0.95, 0.6), 8)
-	badge.position = cell_pos(hover) + Vector3(0, 1.8, 0)
-	hover_root.add_child(badge)
+	# Каскад: что даст сама постройка и какие соседи сработают ещё раз
+	for st in g.cascade(data, hover):
+		var own: bool = st["cell"] == hover
+		var badge := _make_badge(st["yield"], 40 if own else 30, Color(1, 0.95, 0.6) if own else PAIR_COLOR, 8)
+		badge.position = cell_pos(st["cell"]) + Vector3(0, 1.8 if own else 1.45, 0)
+		hover_root.add_child(badge)
+		if not own:
+			_frame(st["cell"], PAIR_COLOR, hover_root, true, 0.06)
 	var dd := int(after["discontent"]) - int(before["discontent"])
 	if dd > 0:
 		var hb := _heart_badge(-dd, 36)
@@ -1132,10 +1132,10 @@ func _refresh_info() -> void:
 	if not run.task.is_empty():
 		var ok: bool = run.task_done(sc)
 		var tb := _section(info_box, "Задание: %s" % _plain_fmt(run.island.get("task_reward", {})), Color("#6fcf97") if ok else Color("#f2c94c"), 18)
-		tb.get_parent().tooltip_text = "Произведите на этом острове столько ресурса — получите награду в казну. Не выполнили — ничего не теряете."
+		tb.get_parent().tooltip_text = "Получите каскадами на этом острове столько ресурса — получите награду в казну. Не выполнили — ничего не теряете."
 		tb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 		for r in run.task:
-			tb.add_child(_progress_row(r, int(sc["total"].get(r, 0)), int(run.task[r])))
+			tb.add_child(_progress_row(r, int(run.earned.get(r, 0)), int(run.task[r])))
 		if ok:
 			tb.add_child(_rich_line("[color=#6fcf97]Готово! Можно забрать остров (Enter)[/color]", 14))
 
@@ -1143,9 +1143,9 @@ func _refresh_info() -> void:
 	if run.is_boss():
 		var b: Dictionary = run.island["boss"]
 		var bb := _section(info_box, "Босс: %s" % b["name"], Color("#eb5757"), 19)
-		bb.get_parent().tooltip_text = "Нужно произвести на этом острове столько всего (любые ресурсы и джокеры). Каждая недостающая единица — минус жизнь."
+		bb.get_parent().tooltip_text = "Нужно получить каскадами на этом острове столько всего (любые ресурсы и джокеры). Каждая недостающая единица — минус жизнь."
 		bb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-		bb.add_child(_progress_row("wild", run.total_of(sc), int(b["need"]), " всего"))
+		bb.add_child(_progress_row("wild", run.earned_total(), int(b["need"]), " всего"))
 	else:
 		var nb: Dictionary = run.next_boss()
 		if not nb.is_empty():
@@ -1155,7 +1155,7 @@ func _refresh_info() -> void:
 	# Контракт с рынка
 	if not run.contract.is_empty() and int(run.contract["sprint"]) == run.sprint:
 		var c: Dictionary = run.contract
-		var have := int(c["progress"]) + int(sc["total"].get(c["res"], 0))
+		var have := int(c["progress"]) + int(run.earned.get(c["res"], 0))
 		var cb := _section(info_box, "Контракт спринта · %s" % _plain_fmt(c["reward"]), Color("#56ccf2"), 16)
 		cb.get_parent().tooltip_text = "Взят на рынке: произвести за этот спринт. Награда — на следующем рынке."
 		cb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
@@ -1180,8 +1180,9 @@ func _refresh_treasury() -> void:
 		var chip := HBoxContainer.new()
 		chip.add_theme_constant_override("separation", 4)
 		chip.add_child(_icon_rect(_icon(r), 34))
-		chip.add_child(_label(str(int(run.stock.get(r, 0))), 28, Color.WHITE))
-		var inc := int(sc["total"].get(r, 0))
+		var shown: Dictionary = _treasury_shown if _treasury_shown != null else run.stock
+		chip.add_child(_label(str(int(shown.get(r, 0))), 28, Color.WHITE))
+		var inc := int(run.earned.get(r, 0))
 		if inc > 0:
 			chip.add_child(_label("+%d" % inc, 18, Color("#6fcf97")))
 		treasury_box.add_child(chip)
@@ -1223,9 +1224,10 @@ func _refresh_side() -> void:
 	var rb := _section(side_box, "Правила", Color("#8a96a3"), 16)
 	var force := _img("force", 16)
 	var t := ""
+	t += "[color=#ffd866][b]Каскад[/b][/color]: доход приходит в момент постройки. Новое здание срабатывает, и каждое соседнее здание срабатывает ещё раз со своим текущим доходом.\n"
 	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
 	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
-	t += "[color=#eb5757]Босс[/color]: на его острове нужно произвести N всего, иначе −1%s за единицу.\n" % _heart_img(14)
+	t += "[color=#eb5757]Босс[/color]: на его острове нужно получить N всего, иначе −1%s за единицу.\n" % _heart_img(14)
 	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
 	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран[/color]"
@@ -1367,7 +1369,9 @@ func _card_tex(id: String) -> Texture2D:
 func _refresh_hint() -> void:
 	var s := ""
 	var f = run.field
-	if busy:
+	if busy and _treasury_shown != null:
+		s = "[color=#ffd866]Каскад: здания срабатывают…[/color]"
+	elif busy:
 		s = "[color=#c58cff]Ходит земля…[/color]"
 	elif run.plays_left <= 0:
 		s = "Нажмите [b]Ход земли[/b]"
@@ -1377,10 +1381,10 @@ func _refresh_hint() -> void:
 		var g = f.clone()
 		var razed: Array = g.place_building(data, hover, id)
 		var after: Dictionary = g.score(data)
-		var d := {}
-		for r in data.resources:
-			d[r] = int(after["total"].get(r, 0)) - int(before["total"].get(r, 0))
-		s = _fmt(d, true)
+		var steps: Array = g.cascade(data, hover)
+		s = "Сразу в казну: " + _fmt(g.cascade_total(steps), true)
+		if steps.size() > 1:
+			s += "   [color=#ffd866](сработают ещё %d %s)[/color]" % [steps.size() - 1, _plural(steps.size() - 1, "сосед", "соседа", "соседей")]
 		var dd := int(after["discontent"]) - int(before["discontent"])
 		if dd > 0:
 			s += "   [color=#ff8080]−%d[/color]%s" % [dd, _heart_img(20)]
@@ -1394,7 +1398,7 @@ func _refresh_hint() -> void:
 		if hover in run.score()["disabled"]:
 			s += "[color=#c0c0c0]выключено Логовом[/color]"
 		else:
-			s += _fmt(cellinfo["yield"], true)
+			s += "при срабатывании " + _fmt(cellinfo["yield"], true)
 	else:
 		s = "[color=#a9b4c0]Построек в этом ходу: %d[/color]" % run.plays_left
 	hint_text.text = "[center]%s[/center]" % s
@@ -1460,24 +1464,46 @@ func _unhandled_input(event: InputEvent) -> void:
 func _try_place(cell: int) -> void:
 	if selected < 0 or not run.can_place(selected, cell):
 		return
-	var before: Dictionary = run.score()
+	var shown: Dictionary = run.stock.duplicate()
 	var r: Dictionary = run.place(selected, cell)
 	if not r["ok"]:
 		return
 	selected = -1
+	_treasury_shown = shown
 	_full_refresh()
-	var after: Dictionary = run.score()
-	var d := {}
-	for res in data.resources:
-		var v := int(after["total"].get(res, 0)) - int(before["total"].get(res, 0))
-		if v != 0:
-			d[res] = v
-	_float_badge(cell, d)
-	for l in after["links"]:
-		if (l["a"] == cell or l["b"] == cell) and l["type"] == "pair":
-			_flash_tile(l["a"] if l["b"] == cell else l["b"], PAIR_COLOR)
 	if not r["razed"].is_empty():
 		_show_toast("[center][b]Логово снесено![/b][/center]")
+	await _play_cascade(r["cascade"])
+	_full_refresh()
+
+
+## Каскад: здания срабатывают по очереди — вспышка, подпрыгивание, всплывающие цифры, казна растёт.
+var _treasury_shown = null
+const CASCADE_STEP := 0.38
+
+func _play_cascade(steps: Array) -> void:
+	busy = true
+	_refresh_ui()
+	for k in steps.size():
+		var st: Dictionary = steps[k]
+		var c: int = st["cell"]
+		_flash_tile(c, PAIR_COLOR if k > 0 else Color.WHITE)
+		var n: Node3D = objs[c] if c < objs.size() else null
+		if n != null:
+			var t := create_tween()
+			t.tween_property(n, "scale", Vector3(1.15, 1.3, 1.15), 0.1)
+			t.tween_property(n, "scale", Vector3.ONE, 0.18).set_trans(Tween.TRANS_BACK)
+		_float_badge(c, st["yield"])
+		if _treasury_shown != null:
+			for res in st["yield"]:
+				_treasury_shown[res] = int(_treasury_shown.get(res, 0)) + int(st["yield"][res])
+			_refresh_treasury()
+		if k == 0 and steps.size() >= 3:
+			_show_toast("[center][b][color=#ffd866]Каскад ×%d![/color][/b][/center]" % steps.size())
+		await get_tree().create_timer(CASCADE_STEP).timeout
+	_treasury_shown = null
+	busy = false
+	_refresh_ui()
 
 
 func _cell_at(screen_pos: Vector2) -> int:
@@ -1545,7 +1571,7 @@ func _show_field_result(res: Dictionary) -> void:
 	overlay_mode = "result"
 	var isl: Dictionary = res["island"]
 	var s := "[center][b][font_size=24]Остров %d пройден[/font_size][/b][/center]\n\n" % run.field_index
-	s += "Доход в казну: %s\n" % _fmt(res["prod"], true)
+	s += "Получено каскадами за остров: %s\n" % _fmt(res["prod"], true)
 	if not res["reward"].is_empty():
 		s += "Награда за остров%s: %s\n" % [" (опасный!)" if isl.get("danger", false) else "", _fmt(res["reward"], true)]
 	if not res["task"].is_empty():
@@ -1745,7 +1771,7 @@ func _refresh_map_detail() -> void:
 	h.add_child(_mini_field(isl["field"], 24))
 	var t := ""
 	if isl.has("boss"):
-		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПроизведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], int(isl["boss"]["need"]), _heart_img()]
+		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПолучите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], int(isl["boss"]["need"]), _heart_img()]
 	else:
 		var ev: Dictionary = data.events.get(isl["event"], {"name": "Спокойная земля", "desc": "Земля на этом острове не двигается."})
 		t += "[font_size=20][b][color=%s]%s[/color][/b][/font_size]%s\n[color=#c9d1d9]%s[/color]\n" % [_island_accent(isl).to_html(false), ev["name"], "  [color=#ff8a70]опасно[/color]" if isl.get("danger", false) else "", ev.get("desc", "")]
