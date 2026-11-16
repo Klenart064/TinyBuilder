@@ -157,6 +157,36 @@ func end_turn() -> Dictionary:
 	return out
 
 
+## Выполнено ли задание прямо сейчас (с учётом запаса).
+func task_done(sc: Dictionary = {}) -> bool:
+	var prog := task_progress(sc)
+	for r in prog:
+		if prog[r]["have"] < prog[r]["need"]:
+			return false
+	return true
+
+
+## Забрать остров досрочно: задание выполнено, оставшиеся ходы земли не наступают.
+func finish_early() -> Dictionary:
+	if game_over or not task_done():
+		return {}
+	_history.clear()
+	return {"land": {}, "field_done": true, "early": true, "result": _finish_field()}
+
+
+## Что перейдёт на следующий остров, если закончить сейчас: {res: n}
+func carry_preview(sc: Dictionary = {}) -> Dictionary:
+	if sc.is_empty():
+		sc = score()
+	var out: Dictionary = data.zero_res()
+	for r in data.resources:
+		var p := int(sc["total"].get(r, 0))
+		var need := int(task.get(r, 0))
+		var still := need - mini(int(carry.get(r, 0)), need)
+		out[r] = maxi(0, p - still)
+	return out
+
+
 ## Сколько поле закроет задание прямо сейчас: {res: {"have", "need", "carry", "prod"}}
 func task_progress(sc: Dictionary = {}) -> Dictionary:
 	if sc.is_empty():

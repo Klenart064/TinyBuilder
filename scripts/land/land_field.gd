@@ -132,12 +132,13 @@ func place_building(data, cell: int, id: String) -> Array:
 
 
 ## Клетки, выключенные логовами: логово выключает одного соседа, на которого смотрит.
+## Военные здания (цвет force) логово не выключает.
 func disabled_cells(data) -> Array:
 	var out := []
 	for i in N:
 		if exists[i] and data.kind(content[i]) == "threat":
 			var j := step(i, facing[i])
-			if j >= 0 and exists[j] and data.is_building(content[j]) and not (j in out):
+			if j >= 0 and exists[j] and data.is_building(content[j]) and data.color_of(content[j]) != "force" and not (j in out):
 				out.append(j)
 	return out
 

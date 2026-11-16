@@ -29,7 +29,11 @@ func _initialize() -> void:
 			while not run.game_over:
 				LandBot.play_turn(run, smart)
 				var ev: String = run.event_type
-				var r: Dictionary = run.end_turn()
+				var r: Dictionary
+				if smart and run.task_done() and run.event_type != "growth":
+					r = run.finish_early()
+				else:
+					r = run.end_turn()
 				if not r.get("field_done", false):
 					continue
 				var res: Dictionary = r["result"]

@@ -84,7 +84,7 @@ static func plan(type: String, field, data, rng: RandomNumberGenerator) -> Dicti
 					var j := LandField.step(t, d)
 					if j >= 0 and field.exists[j]:
 						any.append(d)
-						if data.is_building(field.content[j]):
+						if data.is_building(field.content[j]) and data.color_of(field.content[j]) != "force":
 							dirs.append(d)
 				if dirs.is_empty():
 					dirs = any

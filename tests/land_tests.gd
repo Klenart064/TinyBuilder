@@ -23,6 +23,7 @@ func _initialize() -> void:
 	test_generation()
 	test_run_flow()
 	test_undo()
+	test_finish_early()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -83,6 +84,9 @@ func test_lair() -> void:
 	sc = f.score(data)
 	_check(5 in sc["disabled"] and sc["disabled"].size() == 1, "Логово выключает соседа по стрелке")
 	_check(sc["total"]["food"] == 1, "выключенное здание ничего не даёт и пары нет")
+	f.content[5] = "tower"
+	_check(not (5 in f.score(data)["disabled"]), "Логово не выключает военные здания")
+	f.content[5] = "mill"
 	var run := LandRun.new()
 	run.start(data, 1)
 	run.field = f
@@ -163,6 +167,20 @@ func test_run_flow() -> void:
 			run2.choose_reward(0)
 		guard += 1
 	_check(run2.game_over, "забег ботом доходит до конца (поле %d, жизни %d)" % [run2.field_index, run2.lives])
+
+
+func test_finish_early() -> void:
+	var run := LandRun.new()
+	run.start(data, 9)
+	_check(run.finish_early().is_empty(), "без выполненного задания досрочно не закончить")
+	var f = run.field
+	for i in f.N:
+		if f.is_free(i):
+			f.content[i] = "house"
+	for r in run.task:
+		run.carry[r] = 99
+	var r2: Dictionary = run.finish_early()
+	_check(r2.get("field_done", false) and r2["result"]["missing"] == 0, "задание выполнено — остров можно забрать досрочно")
 
 
 func test_undo() -> void:

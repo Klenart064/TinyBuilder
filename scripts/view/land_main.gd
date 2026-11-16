@@ -50,6 +50,7 @@ var hint_text: RichTextLabel
 var hand_box: HBoxContainer
 var undo_btn: Button
 var end_btn: Button
+var claim_btn: Button
 var overlay: Control
 var overlay_text: RichTextLabel
 var overlay_buttons: HBoxContainer
@@ -837,6 +838,22 @@ func _build_ui() -> void:
 	end_btn.focus_mode = Control.FOCUS_NONE
 	end_btn.pressed.connect(_on_end_turn)
 	buttons.add_child(end_btn)
+	claim_btn = Button.new()
+	claim_btn.text = "Забрать остров\n(Enter)"
+	claim_btn.custom_minimum_size = Vector2(170, 70)
+	claim_btn.add_theme_font_size_override("font_size", 18)
+	claim_btn.focus_mode = Control.FOCUS_NONE
+	var cb := StyleBoxFlat.new()
+	cb.bg_color = Color("#2f6b45")
+	cb.set_corner_radius_all(6)
+	claim_btn.add_theme_stylebox_override("normal", cb)
+	var cbh := cb.duplicate()
+	cbh.bg_color = Color("#3d8a5a")
+	claim_btn.add_theme_stylebox_override("hover", cbh)
+	claim_btn.tooltip_text = "Задание выполнено: закончить остров сейчас, земля больше не ходит"
+	claim_btn.pressed.connect(_on_claim)
+	buttons.add_child(claim_btn)
+	buttons.move_child(claim_btn, 0)
 
 	overlay = ColorRect.new()
 	overlay.color = Color(0, 0, 0, 0.6)
@@ -1044,6 +1061,8 @@ func _refresh_ui() -> void:
 	var last: bool = run.turn >= int(data.run["turns_per_field"])
 	end_btn.text = "%s\n(Пробел)" % ("Ход земли и итог" if last else "Ход земли")
 	end_btn.disabled = busy or run.game_over
+	claim_btn.visible = not run.game_over and run.task_done()
+	claim_btn.disabled = busy
 
 
 func _refresh_info() -> void:
@@ -1089,7 +1108,20 @@ func _refresh_info() -> void:
 			all_ok = false
 	var tb := _section(info_box, "Задание", Color("#6fcf97") if all_ok else Color("#f2c94c"), 19)
 	for r in prog:
-		tb.add_child(_progress_row(r, prog[r]["have"], prog[r]["need"]))
+		tb.add_child(_progress_row(r, prog[r]["have"], prog[r]["need"], ("  (запас %d)" % prog[r]["carry"]) if prog[r]["carry"] > 0 else ""))
+	if all_ok:
+		tb.add_child(_rich_line("[color=#6fcf97]Выполнено! Можно забрать остров (Enter)[/color]", 14))
+
+	# Запас: что перейдёт на следующий остров, если закончить сейчас
+	var cp: Dictionary = run.carry_preview(sc)
+	var cs := ""
+	for r in data.resources:
+		if int(cp[r]) > 0:
+			cs += "[b]+%d[/b]%s  " % [int(cp[r]), _img(r, 22)]
+	var kb := _section(info_box, "Перейдёт на след. остров", Color("#8ab4f8"), 17)
+	kb.get_parent().tooltip_text = "Лишнее сверх задания переходит на следующий остров (только на один) и засчитывается в его задание."
+	kb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
+	kb.add_child(_rich_line(cs if cs != "" else "[color=#6b7683]пока ничего[/color]", 17))
 
 	# Глобальная угроза
 	var g: Dictionary = run.global_threat()
@@ -1351,8 +1383,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_on_undo()
 			KEY_H:
 				_toggle_rules()
-			KEY_SPACE, KEY_ENTER:
+			KEY_SPACE:
 				_on_end_turn()
+			KEY_ENTER, KEY_KP_ENTER:
+				if not event.alt_pressed:
+					_on_claim()
 
 
 func _try_place(cell: int) -> void:
@@ -1425,6 +1460,17 @@ func _on_end_turn() -> void:
 	_full_refresh()
 	if r.get("field_done", false):
 		_show_field_result(r["result"])
+
+
+func _on_claim() -> void:
+	if busy or overlay.visible or run.game_over or not run.task_done():
+		return
+	selected = -1
+	var r: Dictionary = run.finish_early()
+	if r.is_empty():
+		return
+	_full_refresh()
+	_show_field_result(r["result"])
 
 
 func _show_field_result(res: Dictionary) -> void:

@@ -70,11 +70,17 @@ func _run() -> void:
 	_save("land_rules.png")
 	main._toggle_rules()
 	r.hand = ["field", "mill", "mine", "barracks"]
+	r.carry = {"food": 2, "gold": 0, "force": 3}
 	main.selected = -1
 	main.hover = -1
 	main._full_refresh()
 	await _frames(8)
 	_save("land_cards2.png")
+	for res in r.task:
+		r.carry[res] = int(r.task[res])
+	main._full_refresh()
+	await _frames(5)
+	_save("land_claim.png")
 	main._new_run(4)
 	main.toast.visible = false
 	# Ход земли с анимацией и итог поля
