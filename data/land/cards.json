@@ -6,13 +6,13 @@
     "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757", "icon": "res://assets/icons/force.svg" }
   },
   "objects": {
-    "field":    { "name": "Поле",     "kind": "building", "color": "food",  "shape": "flat",  "tint": "#e3cf57", "height": 0.08 },
-    "mill":     { "name": "Мельница", "kind": "building", "color": "food",  "shape": "mill",  "tint": "#c8b8a0", "height": 0.9 },
-    "mine":     { "name": "Шахта",    "kind": "building", "color": "gold",  "shape": "mine",  "tint": "#6b5640", "height": 0.35 },
-    "smithy":   { "name": "Кузница",  "kind": "building", "color": "gold",  "shape": "box",   "tint": "#4a4a55", "height": 0.55 },
-    "barracks": { "name": "Казарма",  "kind": "building", "color": "force", "shape": "box",   "tint": "#a33b3b", "height": 0.5 },
-    "tower":    { "name": "Башня",    "kind": "building", "color": "force", "shape": "tower", "tint": "#8c8c9c", "height": 1.1 },
-    "house":    { "name": "Дом",      "kind": "building", "color": "grey",  "shape": "house", "tint": "#d9a066", "height": 0.45 },
+    "field":    { "name": "Поле", "with": "с Полем",     "kind": "building", "color": "food",  "shape": "flat",  "tint": "#e3cf57", "height": 0.08 },
+    "mill":     { "name": "Мельница", "with": "с Мельницей", "kind": "building", "color": "food",  "shape": "mill",  "tint": "#c8b8a0", "height": 0.9 },
+    "mine":     { "name": "Шахта", "with": "с Шахтой",    "kind": "building", "color": "gold",  "shape": "mine",  "tint": "#6b5640", "height": 0.35 },
+    "smithy":   { "name": "Кузница", "with": "с Кузницей",  "kind": "building", "color": "gold",  "shape": "box",   "tint": "#4a4a55", "height": 0.55 },
+    "barracks": { "name": "Казарма", "with": "с Казармой",  "kind": "building", "color": "force", "shape": "box",   "tint": "#a33b3b", "height": 0.5 },
+    "tower":    { "name": "Башня", "with": "с Башней",    "kind": "building", "color": "force", "shape": "tower", "tint": "#8c8c9c", "height": 1.1 },
+    "house":    { "name": "Дом", "with": "с Домом",      "kind": "building", "color": "grey",  "shape": "house", "tint": "#d9a066", "height": 0.45 },
 
     "rock":     { "name": "Камень",   "kind": "obstacle", "shape": "rock",  "tint": "#6f6f6f", "height": 0.5 },
     "lake":     { "name": "Озеро",    "kind": "obstacle", "shape": "lake",  "tint": "#3f86c7", "height": 0.05, "bonus_to_neighbors": { "food": 1 } },

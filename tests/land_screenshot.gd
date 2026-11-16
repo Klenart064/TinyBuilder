@@ -65,6 +65,10 @@ func _run() -> void:
 	main._full_refresh()
 	await _frames(8)
 	_save("land_board.png")
+	main._toggle_rules()
+	await _frames(5)
+	_save("land_rules.png")
+	main._toggle_rules()
 	main._new_run(4)
 	main.toast.visible = false
 	# Ход земли с анимацией и итог поля

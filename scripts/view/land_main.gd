@@ -26,6 +26,7 @@ var run
 var selected := -1
 var hover := -1
 var busy := false
+var show_rules := false
 
 # 3D
 var camera: Camera3D
@@ -102,7 +103,7 @@ func _build_world() -> void:
 
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 8.6
+	camera.size = 7.8
 	add_child(camera)
 	camera.position = Vector3(7, 8, 7) + Vector3(0.3, 0, 0.3)
 	camera.look_at(Vector3(0.3, 0, 0.3), Vector3.UP)
@@ -359,15 +360,13 @@ func _rebuild_board() -> void:
 
 func _terrain_label(i: int) -> void:
 	var t: Dictionary = data.terrain[run.field.terrain[i]]
-	var txt := ("+1" if int(t["bonus"]) > 0 else "−1")
-	if t["color"] != "any":
-		txt += " " + data.resources[t["color"]]["short"]
-	var lbl := _text_badge(txt, 22, Color("#f4f4f4") if int(t["bonus"]) > 0 else Color("#ffb0a0"))
-	lbl.render_priority = 3
-	lbl.outline_render_priority = 2
-	lbl.position = cell_pos(i) + Vector3(-0.25, 0.05, 0.3)
-	board_root.add_child(lbl)
-
+	var node: Node3D
+	if t["color"] == "any":
+		node = _text_badge("−1", 26, Color("#ffb0a0"))
+	else:
+		node = _make_badge({t["color"]: int(t["bonus"])}, 26, Color.WHITE, 3)
+	node.position = cell_pos(i) + Vector3(-0.28, 0.12, 0.28)
+	board_root.add_child(node)
 
 func _dim(node: Node3D) -> void:
 	if node == null:
@@ -457,11 +456,9 @@ func _rebuild_intent() -> void:
 					_frame(j, Color("#ff9f43"), intent_root, false, 0.05)
 
 
-func _intent_label(i: int, text: String, color: Color) -> void:
-	var lbl := _text_badge(text, 26, color)
-	lbl.position = cell_pos(i) + Vector3(0, 0.25, 0.42)
-	intent_root.add_child(lbl)
-
+## Подписи намерений на поле убраны (видно по подсветке), имя оставлено для простоты.
+func _intent_label(_i: int, _text: String, _color: Color) -> void:
+	pass
 
 func _cross(i: int, color: Color) -> void:
 	var m := _glow_mat(color, 0.7)
@@ -769,13 +766,13 @@ func _build_ui() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(root)
 
-	var left := _panel(root, 330)
+	var left := _panel(root, 300)
 	left.position = Vector2(12, 12)
 	info_box = VBoxContainer.new()
 	info_box.add_theme_constant_override("separation", 8)
 	left.add_child(info_box)
 
-	var right := _panel(root, 290)
+	var right := _panel(root, 260)
 	right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	right.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 12)
 	side_box = VBoxContainer.new()
@@ -797,6 +794,8 @@ func _build_ui() -> void:
 	hint_text.fit_content = true
 	hint_text.scroll_active = false
 	hint_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hint_text.add_theme_font_size_override("normal_font_size", 20)
+	hint_text.add_theme_font_size_override("bold_font_size", 20)
 	hint_text.add_theme_constant_override("outline_size", 6)
 	hint_text.add_theme_color_override("font_outline_color", Color.BLACK)
 	bottom.add_child(hint_text)
@@ -823,12 +822,14 @@ func _build_ui() -> void:
 	row.add_child(buttons)
 	undo_btn = Button.new()
 	undo_btn.text = "Отменить (Z)"
-	undo_btn.custom_minimum_size = Vector2(190, 40)
+	undo_btn.custom_minimum_size = Vector2(170, 44)
+	undo_btn.add_theme_font_size_override("font_size", 16)
 	undo_btn.focus_mode = Control.FOCUS_NONE
 	undo_btn.pressed.connect(_on_undo)
 	buttons.add_child(undo_btn)
 	end_btn = Button.new()
-	end_btn.custom_minimum_size = Vector2(190, 64)
+	end_btn.custom_minimum_size = Vector2(170, 76)
+	end_btn.add_theme_font_size_override("font_size", 19)
 	end_btn.focus_mode = Control.FOCUS_NONE
 	end_btn.pressed.connect(_on_end_turn)
 	buttons.add_child(end_btn)
@@ -919,7 +920,7 @@ func _icon_rect(tex: Texture2D, size: int) -> TextureRect:
 	return tr
 
 
-func _section(parent: VBoxContainer, title: String, color: Color) -> VBoxContainer:
+func _section(parent: VBoxContainer, title: String, color: Color, title_size: int = 15) -> VBoxContainer:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color("#1a212b")
@@ -930,7 +931,7 @@ func _section(parent: VBoxContainer, title: String, color: Color) -> VBoxContain
 	p.add_theme_stylebox_override("panel", sb)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 4)
-	var l := _label(title, 15, color)
+	var l := _label(title, title_size, color)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
 	p.add_child(v)
@@ -941,12 +942,12 @@ func _section(parent: VBoxContainer, title: String, color: Color) -> VBoxContain
 func _progress_row(res: String, have: int, need: int, extra: String = "") -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
-	row.add_child(_icon_rect(_icon(res), 24))
+	row.add_child(_icon_rect(_icon(res), 30))
 	var bar := ProgressBar.new()
 	bar.show_percentage = false
 	bar.max_value = maxi(need, 1)
 	bar.value = mini(have, need)
-	bar.custom_minimum_size = Vector2(0, 22)
+	bar.custom_minimum_size = Vector2(0, 26)
 	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var bg := StyleBoxFlat.new()
@@ -957,7 +958,7 @@ func _progress_row(res: String, have: int, need: int, extra: String = "") -> HBo
 	fill.set_corner_radius_all(4)
 	bar.add_theme_stylebox_override("background", bg)
 	bar.add_theme_stylebox_override("fill", fill)
-	var txt := _label("%d / %d%s%s" % [have, need, extra, "  ✔" if have >= need else ""], 13, Color.WHITE)
+	var txt := _label("%d / %d%s%s" % [have, need, extra, "  ✔" if have >= need else ""], 16, Color.WHITE)
 	txt.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	txt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	txt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -1037,7 +1038,7 @@ func _refresh_ui() -> void:
 	_refresh_hint()
 	undo_btn.disabled = not run.can_undo() or busy
 	var last: bool = run.turn >= int(data.run["turns_per_field"])
-	end_btn.text = "%s (Пробел)\nпостроек осталось: %d" % ["Ход земли и итог" if last else "Ход земли", run.plays_left]
+	end_btn.text = "%s\n(Пробел)" % ("Ход земли и итог" if last else "Ход земли")
 	end_btn.disabled = busy or run.game_over
 
 
@@ -1046,34 +1047,35 @@ func _refresh_info() -> void:
 	var sc: Dictionary = run.score()
 
 	var head := HBoxContainer.new()
-	head.add_child(_label("Поле %d/%d" % [run.field_index, int(data.run["fields_to_win"])], 22, Color.WHITE))
+	head.add_child(_label("Поле %d/%d" % [run.field_index, int(data.run["fields_to_win"])], 24, Color.WHITE))
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(sp)
-	head.add_child(_label("Ход %d/%d" % [run.turn, int(data.run["turns_per_field"])], 20, Color("#c58cff")))
+	head.add_child(_label("Ход %d/%d" % [run.turn, int(data.run["turns_per_field"])], 24, LAND_COLOR))
 	info_box.add_child(head)
 
+	# Жизни: полупрозрачные сердца — столько снимет текущее недовольство
 	var hearts := HBoxContainer.new()
-	hearts.add_theme_constant_override("separation", 1)
+	hearts.add_theme_constant_override("separation", 0)
 	var heart: Texture2D = _icon_tex("res://assets/icons/heart.svg")
-	var max_l := int(data.run["lives"])
 	var danger := int(sc["discontent"])
-	for k in max_l:
-		var tr := _icon_rect(heart, 24)
+	for k in int(data.run["lives"]):
+		var tr := _icon_rect(heart, 26)
 		if k >= run.lives:
-			tr.modulate = Color(0.3, 0.3, 0.3, 0.6)
+			tr.modulate = Color(0.3, 0.3, 0.3, 0.5)
 		elif k >= run.lives - danger:
-			tr.modulate = Color(1, 1, 1, 0.45)
+			tr.modulate = Color(1, 1, 1, 0.35)
 		hearts.add_child(tr)
-	hearts.add_child(_label("  %d" % run.lives, 18, Color("#ff9a9a")))
 	info_box.add_child(hearts)
+	if danger > 0:
+		info_box.add_child(_rich_line("[color=#ff8080]Разные цвета рядом: −%d%s в конце поля[/color]" % [danger, _heart_img(16)], 15))
 
-	# Земля
+	# Земля: название и что она сделает сейчас (полное описание — в подсказке)
 	var ev: Dictionary = run.event_info()
-	var lb := _section(info_box, "Земля: %s" % ev.get("name", ""), LAND_COLOR)
-	lb.add_child(_rich_line("[color=#a9b4c0]%s[/color]" % ev.get("desc", ""), 13))
-	var last: bool = run.turn >= int(data.run["turns_per_field"])
-	lb.add_child(_rich_line("[b]Сейчас:[/b] %s%s" % [LandEvents.describe(run.intent), " — [color=#ff9f43]это последний ход, затем итог поля[/color]" if last else ""], 14))
+	var lb := _section(info_box, ev.get("name", ""), LAND_COLOR, 19)
+	lb.get_parent().tooltip_text = ev.get("desc", "")
+	lb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
+	lb.add_child(_rich_line(LandEvents.describe(run.intent), 15))
 
 	# Задание поля
 	var prog: Dictionary = run.task_progress(sc)
@@ -1081,32 +1083,24 @@ func _refresh_info() -> void:
 	for r in prog:
 		if prog[r]["have"] < prog[r]["need"]:
 			all_ok = false
-	var tb := _section(info_box, "Задание поля (к концу 3-го хода)", Color("#6fcf97") if all_ok else Color("#f2c94c"))
+	var tb := _section(info_box, "Задание", Color("#6fcf97") if all_ok else Color("#f2c94c"), 19)
 	for r in prog:
-		var p: Dictionary = prog[r]
-		tb.add_child(_progress_row(r, p["have"], p["need"], ("  (%d из запаса)" % p["carry"]) if p["carry"] > 0 else ""))
-	tb.add_child(_rich_line("[color=#8a96a3]Каждая недостающая единица = −1%s[/color]" % _heart_img(14), 12))
-
-	# Недовольство
-	var dc := int(sc["discontent"])
-	var db := _section(info_box, "Недовольство: %d" % dc, Color("#eb5757") if dc > 0 else Color("#6b7683"))
-	db.add_child(_rich_line("[color=#8a96a3]%s[/color]" % ("Разные цвета стоят рядом. В конце поля: −%d%s" % [dc, _heart_img(14)] if dc > 0 else "Разные цвета рядом ссорятся: −1%s за каждую такую сторону" % _heart_img(14)), 12))
+		tb.add_child(_progress_row(r, prog[r]["have"], prog[r]["need"]))
 
 	# Глобальная угроза
 	var g: Dictionary = run.global_threat()
-	var end_f: int = run.global_end_field()
-	var left: int = end_f - run.field_index
-	var when := "в конце этого поля!" if left == 0 else "через %d %s" % [left, _plural(left, "поле", "поля", "полей")]
-	var gb := _section(info_box, "Угроза «%s» — %s" % [g["name"], when], Color("#eb5757"))
+	var left: int = run.global_end_field() - run.field_index
+	var when := "это поле!" if left == 0 else "ещё %d %s" % [left + 1, _plural(left + 1, "поле", "поля", "полей")]
+	var gb := _section(info_box, "%s · %s" % [g["name"], when], Color("#eb5757"), 19)
+	gb.get_parent().tooltip_text = "Весь доход этого ресурса за поля %d–%d. Не хватит — минус %d жизни." % [run.global_start, run.global_end_field(), int(g.get("penalty", 3))]
+	gb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 	var cur := int(run.global_progress) + int(sc["total"].get(g["resource"], 0))
 	gb.add_child(_progress_row(g["resource"], cur, int(g["need"])))
-	gb.add_child(_rich_line("[color=#8a96a3]Весь доход %s за поля %d–%d. Не хватит: −%d%s[/color]" % [_img(g["resource"], 14), run.global_start, end_f, int(g.get("penalty", 3)), _heart_img(14)], 12))
-
 
 func _refresh_side() -> void:
 	_clear(side_box)
 	var nf: Dictionary = run.next_field
-	var sb := _section(side_box, "Следующее поле", Color("#8ab4f8"))
+	var sb := _section(side_box, "Дальше", Color("#8ab4f8"), 19)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	sb.add_child(row)
@@ -1118,38 +1112,52 @@ func _refresh_side() -> void:
 	var f = nf["field"]
 	for i in LandField.N:
 		var cell := PanelContainer.new()
-		cell.custom_minimum_size = Vector2(22, 22)
+		cell.custom_minimum_size = Vector2(20, 20)
 		var st := StyleBoxFlat.new()
 		st.set_corner_radius_all(3)
 		st.bg_color = Color("#5d7a3a") if f.exists[i] else Color("#2a313b")
 		cell.add_theme_stylebox_override("panel", st)
 		if f.exists[i] and f.content[i] != "":
-			var q := _label("?", 13, Color.WHITE)
+			var q := _label("?", 12, Color.WHITE)
 			q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cell.add_child(q)
 		grid.add_child(cell)
 	var nev: Dictionary = data.events.get(nf["event"], {})
 	var res_icons := ""
 	for r in nf["task"]:
-		res_icons += _img(r, 20) + " "
-	row.add_child(_rich_line("Земля: [color=#c58cff]%s[/color]\nНужно: %s" % [nev.get("name", ""), res_icons], 13))
-	row.get_child(1).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		res_icons += _img(r, 26) + " "
+	var info := _rich_line("[color=#c58cff]%s[/color]\n%s" % [nev.get("name", ""), res_icons], 15)
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(info)
 
-	var rb := _section(side_box, "Правила", Color("#8a96a3"))
-	var food := _img("food", 14)
-	var gold := _img("gold", 14)
-	var force := _img("force", 14)
+	var help_btn := Button.new()
+	help_btn.text = "Скрыть правила (H)" if show_rules else "Правила (H)"
+	help_btn.focus_mode = Control.FOCUS_NONE
+	help_btn.custom_minimum_size = Vector2(0, 36)
+	help_btn.pressed.connect(_toggle_rules)
+	side_box.add_child(help_btn)
+	if not show_rules:
+		return
+	var rb := _section(side_box, "Правила", Color("#8a96a3"), 16)
+	var food := _img("food", 16)
+	var gold := _img("gold", 16)
+	var force := _img("force", 16)
 	var t := ""
-	t += "Цветное здание: [b]+1[/b] своего ресурса.\n"
-	t += "Разные здания [b]одного цвета[/b] рядом: [color=#ffd866]+2[/color] за сторону (Поле+Мельница %s, Шахта+Кузница %s, Казарма+Башня %s).\n" % [food, gold, force]
-	t += "Дом: +1 к ресурсу каждого соседа, ни с кем не ссорится.\n"
-	t += "[color=#ff8080]Разные цвета рядом: +1 недовольство[/color] (−1%s в конце поля).\n" % _heart_img(12)
-	t += "Озеро: +1%s соседним %s-зданиям. Местность на клетке: +1 или −1.\n" % [food, food]
-	t += "Логово выключает здание по стрелке. %s-здание рядом сносит его.\n" % force
-	t += "Излишки поля переходят на следующее поле.\n"
-	t += "\n[color=#8a96a3]1–4 или клик — карта, клик по клетке — построить, ПКМ/Esc — снять выбор, Z — отменить, Пробел — ход земли.[/color]"
+	t += "Здание: [b]+1[/b] своего цвета.\n"
+	t += "[color=#ffd866]+2[/color] за сторону с другим зданием своего цвета:\n  Поле+Мельница %s\n  Шахта+Кузница %s\n  Казарма+Башня %s\n" % [food, gold, force]
+	t += "Дом: +1 каждому соседу, не ссорится.\n"
+	t += "[color=#ff8080]Разные цвета рядом: −1%s[/color] в конце поля.\n" % _heart_img(14)
+	t += "Не хватило задания: −1%s за штуку.\n" % _heart_img(14)
+	t += "Озеро: +1%s соседям.\n" % food
+	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
+	t += "Излишки идут на следующее поле.\n"
+	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена[/color]"
 	rb.add_child(_rich_line(t, 13))
 
+
+func _toggle_rules() -> void:
+	show_rules = not show_rules
+	_refresh_side()
 
 func _refresh_hand() -> void:
 	_clear(hand_box)
@@ -1160,7 +1168,7 @@ func _refresh_hand() -> void:
 func _card_button(i: int, id: String) -> Button:
 	var col: String = data.color_of(id)
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(158, 150)
+	btn.custom_minimum_size = Vector2(196, 176)
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.disabled = run.plays_left <= 0 or busy
 	var res_col := Color(_res_color(col))
@@ -1173,11 +1181,11 @@ func _card_button(i: int, id: String) -> Button:
 		if state == "disabled":
 			sb.bg_color = Color("#161b23")
 		sb.border_color = Color.WHITE if sel else res_col
-		sb.set_border_width_all(4 if sel else 2)
-		sb.border_width_top = 10
-		sb.set_corner_radius_all(8)
+		sb.set_border_width_all(4 if sel else 3)
+		sb.border_width_top = 16
+		sb.set_corner_radius_all(10)
 		if sel:
-			sb.expand_margin_top = 12
+			sb.expand_margin_top = 14
 		btn.add_theme_stylebox_override(state, sb)
 	btn.pressed.connect(_select.bind(i))
 
@@ -1185,27 +1193,27 @@ func _card_button(i: int, id: String) -> Button:
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8)
-	margin.add_theme_constant_override("margin_top", 14)
+		margin.add_theme_constant_override("margin_" + side, 10)
+	margin.add_theme_constant_override("margin_top", 18)
 	btn.add_child(margin)
 	var v := VBoxContainer.new()
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_theme_constant_override("separation", 2)
+	v.add_theme_constant_override("separation", 4)
 	margin.add_child(v)
-	v.add_child(_label("[%d] %s" % [i + 1, data.obj_name(id)], 16, Color.WHITE))
-	var t := ""
+	var title := _label(data.obj_name(id), 24, Color.WHITE)
+	v.add_child(title)
 	if col == "grey":
-		t = "+1 к ресурсу каждого соседа.\nНи с кем не ссорится."
+		v.add_child(_rich_line("[font_size=30][b]+1[/b][/font_size] %s%s%s" % [_img("food", 28), _img("gold", 28), _img("force", 28)], 18))
+		v.add_child(_rich_line("[color=#a9b4c0]каждому соседу[/color]", 17))
 	else:
+		v.add_child(_rich_line("[font_size=30][b]+1[/b][/font_size] %s" % _img(col, 34), 18))
 		var partners := []
 		for p in data.pair_partners(id):
-			partners.append(data.obj_name(p))
-		t = "+1%s сама\n[color=#ffd866]+2%s[/color] рядом с: %s\n[color=#ff8080]другой цвет рядом: −1[/color]%s" % [_img(col, 14), _img(col, 14), ", ".join(partners), _heart_img(12)]
+			partners.append(data.objects[p].get("with", data.obj_name(p)))
+		v.add_child(_rich_line("[color=#ffd866][b]+2[/b][/color]%s [b]%s[/b]" % [_img(col, 24), ", ".join(partners)], 18))
 		if col == "force":
-			t += "\n[color=#c58cff]сносит соседнее Логово[/color]"
-	v.add_child(_rich_line(t, 12))
+			v.add_child(_rich_line("[color=#c58cff]сносит Логово[/color]", 15))
 	return btn
-
 
 func _refresh_hint() -> void:
 	var s := ""
@@ -1213,55 +1221,34 @@ func _refresh_hint() -> void:
 	if busy:
 		s = "[color=#c58cff]Ходит земля…[/color]"
 	elif run.plays_left <= 0:
-		s = "Постройки на этот ход закончились — нажмите [b]Ход земли[/b] (Пробел)"
-	elif selected >= 0 and selected < run.hand.size():
+		s = "Нажмите [b]Ход земли[/b]"
+	elif selected >= 0 and selected < run.hand.size() and f.is_free(hover):
 		var id: String = run.hand[selected]
-		if f.is_free(hover):
-			var before: Dictionary = run.score()
-			var g = f.clone()
-			var razed: Array = g.place_building(data, hover, id)
-			var after: Dictionary = g.score(data)
-			var d := {}
-			for r in data.resources:
-				d[r] = int(after["total"].get(r, 0)) - int(before["total"].get(r, 0))
-			s = "%s сюда: доход %s" % [data.obj_name(id), _fmt(d, true)]
-			var dd := int(after["discontent"]) - int(before["discontent"])
-			if dd > 0:
-				s += ", [color=#ff8080]недовольство +%d[/color]" % dd
-			if not razed.is_empty():
-				s += ", [color=#7dffa0]Логово будет снесено[/color]"
-			if LandEvents.endangers(run.intent, hover):
-				s += "  [color=#ff5a3c][b]Осторожно: земля уничтожит эту постройку![/b][/color]"
-		elif hover >= 0:
-			s = "[color=#eb5757]Сюда строить нельзя[/color]"
+		var before: Dictionary = run.score()
+		var g = f.clone()
+		var razed: Array = g.place_building(data, hover, id)
+		var after: Dictionary = g.score(data)
+		var d := {}
+		for r in data.resources:
+			d[r] = int(after["total"].get(r, 0)) - int(before["total"].get(r, 0))
+		s = _fmt(d, true)
+		var dd := int(after["discontent"]) - int(before["discontent"])
+		if dd > 0:
+			s += "   [color=#ff8080]−%d[/color]%s" % [dd, _heart_img(20)]
+		if not razed.is_empty():
+			s += "   [color=#7dffa0]Логово снесено[/color]"
+		if LandEvents.endangers(run.intent, hover):
+			s += "   [color=#ff5a3c][b]земля это разрушит![/b][/color]"
+	elif selected < 0 and hover >= 0 and f.exists[hover] and data.is_building(f.content[hover]):
+		var cellinfo: Dictionary = run.score()["cells"][hover]
+		s = data.obj_name(f.content[hover]) + ": "
+		if hover in run.score()["disabled"]:
+			s += "[color=#c0c0c0]выключено Логовом[/color]"
 		else:
-			s = "Выберите клетку для: %s" % data.obj_name(id)
-	elif hover >= 0 and f.exists[hover] and f.content[hover] != "":
-		var id: String = f.content[hover]
-		s = data.obj_name(id)
-		if data.is_building(id):
-			var cellinfo: Dictionary = run.score()["cells"][hover]
-			if hover in run.score()["disabled"]:
-				s += ": [color=#c0c0c0]выключено Логовом[/color]"
-			else:
-				s += ": %s" % _fmt(cellinfo["yield"], true)
-				if not cellinfo["notes"].is_empty():
-					s += " [color=#8a96a3](%s)[/color]" % ", ".join(cellinfo["notes"])
-		elif id == "lake":
-			s += ": +1%s соседним %s-зданиям" % [_img("food", 16), _img("food", 16)]
-		elif id == "lair":
-			s += ": выключает здание по стрелке. Поставьте рядом %s-здание, чтобы снести." % _img("force", 16)
-		elif id == "rock":
-			s += ": просто занимает клетку"
-	elif hover >= 0 and f.exists[hover] and f.terrain[hover] != "":
-		var t: Dictionary = data.terrain[f.terrain[hover]]
-		s = "%s: %s" % [t["name"], ("+1 %s-зданию" % _img(t["color"], 16)) if int(t["bonus"]) > 0 else "−1 любому цветному зданию"]
+			s += _fmt(cellinfo["yield"], true)
 	else:
-		s = "Выберите карту (построек на ход: %d)" % run.plays_left
+		s = "[color=#a9b4c0]Построек в этом ходу: %d[/color]" % run.plays_left
 	hint_text.text = "[center]%s[/center]" % s
-
-
-# ---------------------------------------------------------------- Ввод
 
 func _select(i: int) -> void:
 	if overlay.visible or busy or run.plays_left <= 0:
@@ -1300,6 +1287,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_update_hover()
 			KEY_Z:
 				_on_undo()
+			KEY_H:
+				_toggle_rules()
 			KEY_SPACE, KEY_ENTER:
 				_on_end_turn()
 
