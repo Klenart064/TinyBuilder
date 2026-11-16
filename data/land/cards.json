@@ -1,0 +1,29 @@
+{
+  "_help": "Объекты живой земли. color — цвет зоны: food (🌾), gold (🪙), force (🛡) или grey (Дом). kind: building — карта игрока; obstacle — препятствие (камень, озеро); threat — здание-угроза земли. shape/tint/height — как выглядит кубик.",
+  "resources": {
+    "food":  { "name": "Еда",    "short": "еды",    "color": "#8bc34a", "icon": "res://assets/icons/food.svg" },
+    "gold":  { "name": "Золото", "short": "золота", "color": "#f2c94c", "icon": "res://assets/icons/gold.svg" },
+    "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757", "icon": "res://assets/icons/force.svg" }
+  },
+  "objects": {
+    "field":    { "name": "Поле",     "kind": "building", "color": "food",  "shape": "flat",  "tint": "#e3cf57", "height": 0.08 },
+    "mill":     { "name": "Мельница", "kind": "building", "color": "food",  "shape": "mill",  "tint": "#c8b8a0", "height": 0.9 },
+    "mine":     { "name": "Шахта",    "kind": "building", "color": "gold",  "shape": "mine",  "tint": "#6b5640", "height": 0.35 },
+    "smithy":   { "name": "Кузница",  "kind": "building", "color": "gold",  "shape": "box",   "tint": "#4a4a55", "height": 0.55 },
+    "barracks": { "name": "Казарма",  "kind": "building", "color": "force", "shape": "box",   "tint": "#a33b3b", "height": 0.5 },
+    "tower":    { "name": "Башня",    "kind": "building", "color": "force", "shape": "tower", "tint": "#8c8c9c", "height": 1.1 },
+    "house":    { "name": "Дом",      "kind": "building", "color": "grey",  "shape": "house", "tint": "#d9a066", "height": 0.45 },
+
+    "rock":     { "name": "Камень",   "kind": "obstacle", "shape": "rock",  "tint": "#6f6f6f", "height": 0.5 },
+    "lake":     { "name": "Озеро",    "kind": "obstacle", "shape": "lake",  "tint": "#3f86c7", "height": 0.05, "bonus_to_neighbors": { "food": 1 } },
+    "lair":     { "name": "Логово",   "kind": "threat",   "shape": "lair",  "tint": "#3a2a3f", "height": 0.9 }
+  },
+  "_terrain_help": "Местность под клеткой. bonus — сколько добавляется зданию своего цвета (color) или любому цветному (color: any).",
+  "terrain": {
+    "fertile_food":  { "name": "Плодородная земля", "color": "food",  "bonus": 1,  "tint": "#7f9a3a" },
+    "fertile_gold":  { "name": "Рудная жила",       "color": "gold",  "bonus": 1,  "tint": "#9a8a4a" },
+    "fertile_force": { "name": "Холм",              "color": "force", "bonus": 1,  "tint": "#8a6a5a" },
+    "swamp":         { "name": "Болото",            "color": "any",   "bonus": -1, "tint": "#3f4a33" }
+  },
+  "starter_deck": { "field": 3, "mill": 3, "mine": 3, "smithy": 3, "barracks": 3, "tower": 3, "house": 2 }
+}
