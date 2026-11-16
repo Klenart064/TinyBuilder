@@ -7,6 +7,7 @@ const LandRun = preload("res://scripts/land/land_run.gd")
 const LandField = preload("res://scripts/land/land_field.gd")
 const LandEvents = preload("res://scripts/land/land_events.gd")
 const Models = preload("res://scripts/view/models.gd")
+const LandBot = preload("res://scripts/land/land_bot.gd")
 const CubeField = preload("res://scripts/land/cube_field.gd")
 
 const STEP := 1.15
@@ -1347,7 +1348,7 @@ func _refresh_side() -> void:
 	t += "[color=#ffb347]Каменный куб[/color]: 6 граней с печатями. Каждый ход катите куб на соседнюю грань и стройте на верхней. В конце хода печать верхней грани проверяют: хватает — снята, нет — −1%s за каждую недостающую единицу. Здания на краю — соседи зданий соседней грани.\n" % _heart_img(14)
 	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
-	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран[/color]"
+	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран, F2 сразу к кубу[/color]"
 	rb.add_child(_rich_line(t, 13))
 
 
@@ -1583,6 +1584,9 @@ func _input(event: InputEvent) -> void:
 		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
 			var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_F2 and not busy:
+			_skip_to_cube()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_D and not busy:
 			_show_deck()
@@ -2644,3 +2648,26 @@ func _cube_judge_fx(j: Dictionary) -> float:
 	else:
 		_show_toast("[center][b][color=#ff8080]Печать устояла: не хватило %d → −%d[/color][/b]%s[/center]" % [j["miss"], j["miss"], _heart_img(22)])
 	return 0.6
+
+
+## F2 (для проверки): новый забег, бот доигрывает до босса-куба, жизни восстановлены.
+func _skip_to_cube() -> void:
+	for attempt in 20:
+		run.start(data, -1)
+		while not run.game_over and not (run.phase == "map" and run.choices.size() == 1 and run.choices[0].get("boss", {}).has("cube")):
+			if run.phase == "map":
+				run.choose_island(LandBot.pick_island(run, true))
+			elif run.phase == "market":
+				LandBot.shop(run, true)
+				run.leave_market()
+			LandBot.play_turn(run, true)
+			run.end_turn()
+		if not run.game_over:
+			break
+	run.lives = int(data.run["lives"])
+	selected = -1
+	busy = false
+	_hide_overlay()
+	_full_refresh()
+	_show_map()
+	_show_toast("[center][b]Бот доиграл до Каменного куба[/b]\n[font_size=16]Жизни восстановлены. Выберите куб на карте.[/font_size][/center]")
