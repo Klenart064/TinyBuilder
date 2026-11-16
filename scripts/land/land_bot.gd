@@ -28,7 +28,7 @@ static func play_turn(run, smart: bool = true) -> void:
 		run.place(best[0], best[1])
 
 
-## Оценка поля после хода земли: доход в казну, нехватка на плату и босса, недовольство.
+## Оценка поля после хода земли: доход в казну, задание, босс, недовольство.
 static func value(run, f) -> float:
 	var g = f.clone()
 	LandEvents.apply(run.intent, g, run.data)
@@ -36,12 +36,77 @@ static func value(run, f) -> float:
 	var v := 0.0
 	for r in sc["total"]:
 		v += float(sc["total"][r]) * (1.3 if r == "wild" else 1.0)
-	var pool: Dictionary = run.projected(sc)
-	var miss: int = run.pay(pool, run.task)["missing"]
-	var b: Dictionary = run.next_boss()
-	if int(b.get("at_field", -1)) == run.field_index:
-		miss += run.pay(pool, b.get("cost", {}))["missing"]
-	v -= 3.5 * float(miss)
+	if not run.task.is_empty():
+		var short := 0
+		for r in run.task:
+			short += maxi(0, int(run.task[r]) - int(sc["total"].get(r, 0)))
+		var rew := 0
+		for r in run.island.get("task_reward", {}):
+			rew += int(run.island["task_reward"][r])
+		v += float(rew) * 1.3 if short == 0 else -0.5 * float(short)
+	if run.is_boss():
+		var miss := maxi(0, int(run.island["boss"]["need"]) - run.total_of(sc))
+		v -= 3.5 * float(miss)
 	v -= 3.5 * float(sc["discontent"])
 	v += 3.0 * float(mini(int(sc.get("joy", 0)), int(run.data.run["lives"]) - run.lives))
 	return v
+
+
+## Выбор острова на карте: спокойные проще, опасные дают больше; задание — плюс.
+static func pick_island(run, smart: bool = true) -> int:
+	if not smart:
+		return run.rng.randi_range(0, run.choices.size() - 1)
+	var best := 0
+	var best_v := -999.0
+	for i in run.choices.size():
+		var isl: Dictionary = run.choices[i]
+		var v := 0.0
+		for r in isl.get("reward", {}):
+			v += float(isl["reward"][r])
+		if not isl.get("task", {}).is_empty():
+			for r in isl.get("task_reward", {}):
+				v += 0.6 * float(isl["task_reward"][r])
+		var ev: String = isl.get("event", "")
+		if ev != "":
+			v -= 1.0
+		if isl.get("danger", false):
+			v -= 2.0 if run.lives > 6 else 6.0
+		if v > best_v:
+			best_v = v
+			best = i
+	return best
+
+
+## Рынок: лечение при малом запасе жизней, улучшения добычи/мастерских, покупка, контракт.
+static func shop(run, smart: bool = true) -> void:
+	if not smart:
+		run.take_contract()
+		return
+	run.take_contract()
+	while run.lives <= int(run.data.run["lives"]) - 4 and run.heal():
+		pass
+	var changed := true
+	while changed:
+		changed = false
+		var cards: Array = run.all_cards()
+		cards.sort_custom(func(a, b): return _prio(run, a) > _prio(run, b))
+		for id in cards:
+			if run.data.can_upgrade(id) and run.upgrade(id):
+				changed = true
+				break
+		if changed:
+			continue
+		for i in run.market["buy"].size():
+			if run.data.is_producer(run.market["buy"][i]) and run.buy(i):
+				changed = true
+				break
+	while run.lives < int(run.data.run["lives"]) and run.heal():
+		pass
+
+
+static func _prio(run, id: String) -> int:
+	match run.data.role(id):
+		"workshop": return 3
+		"base": return 2
+		"housing": return 1
+	return 0

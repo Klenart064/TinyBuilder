@@ -21,6 +21,18 @@ func load_all(dir: String = "res://data/land") -> bool:
 	objects = cards["objects"]
 	terrain = cards["terrain"]
 	starter_deck = cards["starter_deck"]
+	# Улучшенные карты: «field+» = копия «field» с полями из upgrade
+	for id in objects.keys():
+		var o: Dictionary = objects[id]
+		if o.has("upgrade"):
+			var up: Dictionary = o.duplicate(true)
+			up.erase("upgrade")
+			for k in o["upgrade"]:
+				up[k] = o["upgrade"][k]
+			up["name"] = o["name"] + "+"
+			up["upgraded"] = true
+			up["base_id"] = id
+			objects[id + "+"] = up
 	run = run_file
 	rules = run_file["rules"]
 	colors = []
@@ -39,7 +51,7 @@ func validate() -> bool:
 		if not is_building(id):
 			push_error("starter_deck: '%s' — не карта здания" % id)
 			ok = false
-	for key in ["prebuilt_pool", "reward_pool"]:
+	for key in ["prebuilt_pool", "buy_pool"]:
 		for id in run.get(key, []):
 			if not is_building(id):
 				push_error("%s: '%s' — не карта здания" % [key, id])
@@ -53,11 +65,6 @@ func validate() -> bool:
 		if not terrain.has(t):
 			push_error("terrain_pool: неизвестная местность '%s'" % t)
 			ok = false
-	for b in run.get("bosses", []) + [run.get("final_threat", {})]:
-		for r in b.get("cost", {}):
-			if not resources.has(r):
-				push_error("bosses/final_threat: неизвестный ресурс '%s'" % r)
-				ok = false
 	return ok
 
 
@@ -91,6 +98,24 @@ func color_of(id: String) -> String:
 	return objects[id].get("color", "")
 
 
+## Число из карты (base, self, per_base, wild, per_color, per_housing).
+func val(id: String, key: String) -> int:
+	return int(objects.get(id, {}).get(key, 0))
+
+
+## «field+» → «field».
+func base_id(id: String) -> String:
+	return objects.get(id, {}).get("base_id", id)
+
+
+func is_upgraded(id: String) -> bool:
+	return objects.get(id, {}).get("upgraded", false)
+
+
+func can_upgrade(id: String) -> bool:
+	return objects.has(id + "+")
+
+
 func obj_name(id: String) -> String:
 	return objects.get(id, {}).get("name", id)
 
@@ -109,7 +134,7 @@ func pair_partners(id: String) -> Array:
 	if want == "":
 		return out
 	for other in objects:
-		if role(other) == want and color_of(other) == color_of(id):
+		if role(other) == want and color_of(other) == color_of(id) and not is_upgraded(other):
 			out.append(other)
 	return out
 

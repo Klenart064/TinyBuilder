@@ -21,7 +21,7 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 	var m = new()
 	m.alpha = alpha_
 	m.root = Node3D.new()
-	match id:
+	match id.trim_suffix("+"):
 		"field": m._field()
 		"mill": m._mill()
 		"mine": m._mine()
@@ -33,7 +33,16 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 		"market": m._market()
 		"tavern": m._tavern()
 		_: return null
+	if id.ends_with("+"):
+		m._upgrade_flag()
 	return m.root
+
+
+## Улучшенная карта: золотой флажок на углу клетки.
+func _upgrade_flag() -> void:
+	box(Vector3(0.04, 0.9, 0.04), Vector3(-0.4, 0.45, 0.4), WOOD_DARK)
+	box(Vector3(0.02, 0.18, 0.26), Vector3(-0.4, 0.8, 0.27), GOLD, Vector3.ZERO, true)
+	ball(0.05, Vector3(-0.4, 0.92, 0.4), GOLD, true)
 
 
 # ---------------------------------------------------------------- примитивы

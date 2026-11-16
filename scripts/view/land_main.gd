@@ -55,6 +55,9 @@ var treasury_box: HBoxContainer
 var overlay: Control
 var overlay_text: RichTextLabel
 var overlay_buttons: HBoxContainer
+var overlay_body: VBoxContainer
+var overlay_box: PanelContainer
+var overlay_mode := ""  # "", "result", "map", "market", "deck"
 var toast: RichTextLabel
 
 
@@ -74,7 +77,7 @@ func _new_run(seed: int = -1) -> void:
 	busy = false
 	_hide_overlay()
 	_full_refresh()
-	_announce_field()
+	_show_map()
 
 
 func _process(delta: float) -> void:
@@ -759,7 +762,7 @@ func _show_toast(text: String) -> void:
 
 func _announce_field() -> void:
 	var ev: Dictionary = run.event_info()
-	_show_toast("[center][b]Поле %d: %s[/b]\n[font_size=16]%s[/font_size][/center]" % [run.field_index, ev.get("name", ""), ev.get("desc", "")])
+	_show_toast("[center][b]Остров %d: %s[/b]\n[font_size=16]%s[/font_size][/center]" % [run.field_index, ev.get("name", ""), ev.get("desc", "")])
 
 
 # ---------------------------------------------------------------- Интерфейс
@@ -879,6 +882,7 @@ func _build_ui() -> void:
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(center)
 	var box := PanelContainer.new()
+	overlay_box = box
 	box.custom_minimum_size = Vector2(600, 0)
 	var box_sb := StyleBoxFlat.new()
 	box_sb.bg_color = Color("#1d2430")
@@ -889,10 +893,10 @@ func _build_ui() -> void:
 	center.add_child(box)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 20)
+		margin.add_theme_constant_override("margin_" + side, 16)
 	box.add_child(margin)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 16)
+	v.add_theme_constant_override("separation", 12)
 	margin.add_child(v)
 	overlay_text = RichTextLabel.new()
 	overlay_text.bbcode_enabled = true
@@ -901,6 +905,9 @@ func _build_ui() -> void:
 	overlay_text.add_theme_font_size_override("normal_font_size", 16)
 	overlay_text.add_theme_font_size_override("bold_font_size", 16)
 	v.add_child(overlay_text)
+	overlay_body = VBoxContainer.new()
+	overlay_body.add_theme_constant_override("separation", 12)
+	v.add_child(overlay_body)
 	overlay_buttons = HBoxContainer.new()
 	overlay_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	overlay_buttons.add_theme_constant_override("separation", 10)
@@ -1079,20 +1086,21 @@ func _refresh_ui() -> void:
 	undo_btn.disabled = not run.can_undo() or busy
 	var last: bool = run.turn >= int(data.run["turns_per_field"])
 	end_btn.text = "%s\n(Пробел)" % ("Ход земли и итог" if last else "Ход земли")
-	end_btn.disabled = busy or run.game_over
-	claim_btn.visible = not run.game_over and run.task_done()
+	end_btn.disabled = busy or run.game_over or run.phase != "island"
+	claim_btn.visible = not run.game_over and run.phase == "island" and run.task_done()
 	claim_btn.disabled = busy
 
 
 func _refresh_info() -> void:
 	_clear(info_box)
 	var sc: Dictionary = run.score()
+	var sp: Dictionary = run.sprint_info()
 
 	var head := HBoxContainer.new()
-	head.add_child(_label("Остров %d/%d" % [run.field_index, int(data.run["fields_to_win"])], 24, Color.WHITE))
-	var sp := Control.new()
-	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(sp)
+	head.add_child(_label("Остров %d/%d" % [maxi(run.field_index, 1), run.total_islands()], 24, Color.WHITE))
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(gap)
 	head.add_child(_label("Ход %d/%d" % [run.turn, int(data.run["turns_per_field"])], 24, LAND_COLOR))
 	info_box.add_child(head)
 
@@ -1110,45 +1118,58 @@ func _refresh_info() -> void:
 		hearts.add_child(tr)
 	info_box.add_child(hearts)
 	if danger > 0:
-		info_box.add_child(_rich_line("[color=#ff8080]Разные цвета рядом: −%d%s в конце поля[/color]" % [danger, _heart_img(16)], 15))
+		info_box.add_child(_rich_line("[color=#ff8080]Разные цвета рядом: −%d%s в конце острова[/color]" % [danger, _heart_img(16)], 15))
 
 	# Земля: название и что она сделает сейчас (полное описание — в подсказке)
 	var ev: Dictionary = run.event_info()
-	var lb := _section(info_box, ev.get("name", ""), LAND_COLOR, 19)
+	var danger_isl: bool = run.island.get("danger", false)
+	var lb := _section(info_box, ev.get("name", "") + ("  · опасно" if danger_isl else ""), DANGER_COLOR if danger_isl else LAND_COLOR, 19)
 	lb.get_parent().tooltip_text = ev.get("desc", "")
 	lb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 	lb.add_child(_rich_line(LandEvents.describe(run.intent), 15))
 
-	# Плата острова (из казны в конце острова)
-	var prog: Dictionary = run.task_progress(sc)
-	var all_ok := true
-	for r in prog:
-		if prog[r]["have"] < prog[r]["need"]:
-			all_ok = false
-	var tb := _section(info_box, "Плата острова", Color("#6fcf97") if all_ok else Color("#f2c94c"), 19)
-	tb.get_parent().tooltip_text = "В конце острова платится из казны. Не хватит — минус жизнь за каждую единицу. Джокеры закрывают нехватку любого цвета."
-	tb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-	for r in prog:
-		tb.add_child(_progress_row(r, prog[r]["have"], prog[r]["need"], ("  (джокеры %d)" % prog[r]["wild"]) if prog[r]["wild"] > 0 else ""))
-	if all_ok:
-		tb.add_child(_rich_line("[color=#6fcf97]Хватает! Можно забрать остров (Enter)[/color]", 14))
+	# Задание острова (не на каждом): выполнил — награда
+	if not run.task.is_empty():
+		var ok: bool = run.task_done(sc)
+		var tb := _section(info_box, "Задание: %s" % _plain_fmt(run.island.get("task_reward", {})), Color("#6fcf97") if ok else Color("#f2c94c"), 18)
+		tb.get_parent().tooltip_text = "Произведите на этом острове столько ресурса — получите награду в казну. Не выполнили — ничего не теряете."
+		tb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
+		for r in run.task:
+			tb.add_child(_progress_row(r, int(sc["total"].get(r, 0)), int(run.task[r])))
+		if ok:
+			tb.add_child(_rich_line("[color=#6fcf97]Готово! Можно забрать остров (Enter)[/color]", 14))
 
-	# Ближайший босс / финальная угроза
-	var bs: Dictionary = run.next_boss()
-	var left: int = int(bs["at_field"]) - run.field_index
-	var when := "в конце этого острова!" if left == 0 else "через %d %s" % [left, _plural(left, "остров", "острова", "островов")]
-	var gb := _section(info_box, "%s · %s" % [bs.get("name", ""), when], Color("#eb5757"), 18)
-	gb.get_parent().tooltip_text = "Платится из казны после платы острова. Не хватит — минус %d жизни за каждую единицу." % int(bs.get("life_per_missing", data.run.get("life_per_missing", 1)))
-	gb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-	var pool: Dictionary = run.projected(sc)
-	run.pay(pool, run.task)
-	var cost: Dictionary = bs.get("cost", {})
-	for r in cost:
-		var own := mini(int(pool.get(r, 0)), int(cost[r]))
-		pool[r] = int(pool.get(r, 0)) - own
-		var w := mini(int(pool.get("wild", 0)), int(cost[r]) - own)
-		pool["wild"] = int(pool.get("wild", 0)) - w
-		gb.add_child(_progress_row(r, own + w, int(cost[r])))
+	# Босс на этом острове или впереди
+	if run.is_boss():
+		var b: Dictionary = run.island["boss"]
+		var bb := _section(info_box, "Босс: %s" % b["name"], Color("#eb5757"), 19)
+		bb.get_parent().tooltip_text = "Нужно произвести на этом острове столько всего (любые ресурсы и джокеры). Каждая недостающая единица — минус жизнь."
+		bb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
+		bb.add_child(_progress_row("wild", run.total_of(sc), int(b["need"]), " всего"))
+	else:
+		var nb: Dictionary = run.next_boss()
+		if not nb.is_empty():
+			var left := int(nb["islands_left"])
+			info_box.add_child(_rich_line("[color=#eb5757]%s[/color] через %d %s: нужно [b]%d[/b] за остров" % [nb["name"], left, _plural(left, "остров", "острова", "островов"), int(nb["need"])], 14))
+
+	# Контракт с рынка
+	if not run.contract.is_empty() and int(run.contract["sprint"]) == run.sprint:
+		var c: Dictionary = run.contract
+		var have := int(c["progress"]) + int(sc["total"].get(c["res"], 0))
+		var cb := _section(info_box, "Контракт спринта · %s" % _plain_fmt(c["reward"]), Color("#56ccf2"), 16)
+		cb.get_parent().tooltip_text = "Взят на рынке: произвести за этот спринт. Награда — на следующем рынке."
+		cb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
+		cb.add_child(_progress_row(c["res"], have, int(c["amount"])))
+
+
+## Награда текстом с иконками, без цвета (для заголовков-лейблов).
+func _plain_fmt(amounts: Dictionary) -> String:
+	var parts := []
+	for r in data.resources:
+		var v := int(amounts.get(r, 0))
+		if v != 0:
+			parts.append("+%d %s" % [v, "джокер" if r == "wild" and v == 1 else ("джокера" if r == "wild" and v < 5 else ("джокеров" if r == "wild" else data.resources[r].get("name", r)))])
+	return ", ".join(parts)
 
 
 func _refresh_treasury() -> void:
@@ -1174,36 +1195,22 @@ func _refresh_treasury() -> void:
 
 func _refresh_side() -> void:
 	_clear(side_box)
-	var nf: Dictionary = run.next_field
-	var sb := _section(side_box, "Дальше", Color("#8ab4f8"), 19)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	sb.add_child(row)
-	var grid := GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 2)
-	grid.add_theme_constant_override("v_separation", 2)
-	row.add_child(grid)
-	var f = nf["field"]
-	for i in LandField.N:
-		var cell := PanelContainer.new()
-		cell.custom_minimum_size = Vector2(20, 20)
-		var st := StyleBoxFlat.new()
-		st.set_corner_radius_all(3)
-		st.bg_color = Color("#5d7a3a") if f.exists[i] else Color("#2a313b")
-		cell.add_theme_stylebox_override("panel", st)
-		if f.exists[i] and f.content[i] != "":
-			var q := _label("?", 12, Color.WHITE)
-			q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			cell.add_child(q)
-		grid.add_child(cell)
-	var nev: Dictionary = data.events.get(nf["event"], {})
-	var res_icons := ""
-	for r in nf["task"]:
-		res_icons += _img(r, 26) + " "
-	var info := _rich_line("[color=#c58cff]%s[/color]\n%s" % [nev.get("name", ""), res_icons], 15)
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(info)
+	var sp: Dictionary = run.sprint_info()
+	var rb0 := _section(side_box, "Спринт %d из %d" % [run.sprint + 1, run.sprints().size()], Color("#8ab4f8"), 19)
+	var steps := ""
+	for li in int(sp["layers"]):
+		var boss: bool = sp.has("boss") and li == int(sp["layers"]) - 1
+		var col := "#6fcf97" if li < run.layer else ("#ffffff" if li == run.layer else "#6b7480")
+		steps += "[color=%s]%s[/color]  " % [col, ("[b]Босс[/b]" if boss else "Остров %d" % (li + 1)) if li == run.layer else ("Б" if boss else str(li + 1))]
+	steps += "[color=#f2c94c]Рынок[/color]" if run.sprint < run.sprints().size() - 1 else "[color=#f2c94c]Финал[/color]"
+	rb0.add_child(_rich_line(steps, 15))
+
+	var deck_btn := Button.new()
+	deck_btn.text = "Колода: %d карт (D)" % run.all_cards().size()
+	deck_btn.focus_mode = Control.FOCUS_NONE
+	deck_btn.custom_minimum_size = Vector2(0, 36)
+	deck_btn.pressed.connect(_show_deck)
+	side_box.add_child(deck_btn)
 
 	var help_btn := Button.new()
 	help_btn.text = "Скрыть правила (H)" if show_rules else "Правила (H)"
@@ -1214,18 +1221,14 @@ func _refresh_side() -> void:
 	if not show_rules:
 		return
 	var rb := _section(side_box, "Правила", Color("#8a96a3"), 16)
-	var food := _img("food", 16)
-	var gold := _img("gold", 16)
 	var force := _img("force", 16)
 	var t := ""
-	t += "Доход копится в [b]казне[/b] на весь забег. Из неё платятся острова, боссы и финальная угроза. Не хватило — −1%s за единицу.\n" % _heart_img(14)
-	t += "Добыча (Поле, Шахта, Башня): +2 своего цвета.\n"
-	t += "Мастерская (Мельница, Кузница, Казарма): +1 и [color=#ffd866]+2 за каждую добычу своего цвета рядом[/color].\n"
-	t += "Домик/Усадьба: джокеры %s — закрывают любой цвет.\n" % _img("wild", 14)
-	t += "Рынок: +1 за каждый цвет рядом. Таверна: +1%s за жильё рядом.\n" % _heart_img(14)
+	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
+	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
+	t += "[color=#eb5757]Босс[/color]: на его острове нужно произвести N всего, иначе −1%s за единицу.\n" % _heart_img(14)
 	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
-	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, F11 полный экран[/color]"
+	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран[/color]"
 	rb.add_child(_rich_line(t, 13))
 
 
@@ -1281,7 +1284,7 @@ func _card_button(i: int, id: String) -> Button:
 	pic.custom_minimum_size = Vector2(0, 104)
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(pic)
-	var title := _label(data.obj_name(id), 20, Color.WHITE)
+	var title := _label(data.obj_name(id), 20, Color("#f2c94c") if data.is_upgraded(id) else Color.WHITE)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
 	var t := _card_rules(id)
@@ -1289,25 +1292,34 @@ func _card_button(i: int, id: String) -> Button:
 	v.add_child(stats)
 	return btn
 
-## Короткое правило карты иконками.
-func _card_rules(id: String) -> String:
-	var rules: Dictionary = data.rules
+## Короткое правило карты иконками (числа — из data/land/cards.json, у улучшенных свои).
+func _card_rules(id: String, small: bool = false) -> String:
 	var col: String = data.color_of(id)
+	var big := 18 if small else 22
+	var ic := 20 if small else 26
 	match data.role(id):
 		"base":
-			return "[font_size=22][b]+%d[/b][/font_size]%s" % [int(rules["base"]), _img(col, 26)]
+			return "[font_size=%d][b]+%d[/b][/font_size]%s" % [big, data.val(id, "base"), _img(col, ic)]
 		"workshop":
 			var partners := []
 			for p in data.pair_partners(id):
 				partners.append(data.objects[p].get("acc", data.obj_name(p)))
-			return "[b]+%d[/b]%s  [color=#ffd866][b]+%d[/b][/color]%s за %s" % [int(rules["workshop_self"]), _img(col, 20), int(rules["workshop_per_base"]), _img(col, 20), "/".join(partners)]
+			if small:
+				return "[b]+%d[/b]%s [color=#ffd866][b]+%d[/b][/color]%s за %s" % [data.val(id, "self"), _img(col, 16), data.val(id, "per_base"), _img(col, 16), "/".join(partners)]
+			return "[b]+%d[/b]%s  [color=#ffd866][b]+%d[/b][/color]%s за %s" % [data.val(id, "self"), _img(col, 20), data.val(id, "per_base"), _img(col, 20), "/".join(partners)]
 		"housing":
-			return "[font_size=22][b]+%d[/b][/font_size]%s [color=#a9b4c0]любой цвет[/color]" % [int(data.objects[id].get("wild", 1)), _img("wild", 26)]
-	if id == "market":
-		return "[b]+%d[/b] за каждый цвет рядом %s%s%s" % [int(rules["market_per_color"]), _img("food", 16), _img("gold", 16), _img("force", 16)]
-	if id == "tavern":
-		return "[b]+%d[/b]%s за жильё рядом" % [int(rules["tavern_per_housing"]), _heart_img(18)]
+			if small:
+				return "[font_size=%d][b]+%d[/b][/font_size]%s" % [big, data.val(id, "wild"), _img("wild", ic)]
+			return "[font_size=%d][b]+%d[/b][/font_size]%s [color=#a9b4c0]любой цвет[/color]" % [big, data.val(id, "wild"), _img("wild", ic)]
+	match data.base_id(id):
+		"market":
+			if small:
+				return "[b]+%d[/b] за цвет рядом" % data.val(id, "per_color")
+			return "[b]+%d[/b] за каждый цвет рядом %s%s%s" % [data.val(id, "per_color"), _img("food", 16), _img("gold", 16), _img("force", 16)]
+		"tavern":
+			return "[b]+%d[/b]%s за жильё рядом" % [data.val(id, "per_housing"), _heart_img(18)]
 	return ""
+
 
 
 ## Картинка здания для карты: модель рендерится в отдельном мире (SubViewport).
@@ -1403,6 +1415,9 @@ func _input(event: InputEvent) -> void:
 			var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
 			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_D and not busy:
+			_show_deck()
+			get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1493,7 +1508,7 @@ func _on_undo() -> void:
 
 
 func _on_end_turn() -> void:
-	if busy or overlay.visible or run.game_over:
+	if busy or overlay.visible or run.game_over or run.phase != "island":
 		return
 	selected = -1
 	busy = true
@@ -1515,7 +1530,7 @@ func _on_end_turn() -> void:
 
 
 func _on_claim() -> void:
-	if busy or overlay.visible or run.game_over or not run.task_done():
+	if busy or overlay.visible or run.game_over or run.phase != "island" or not run.task_done():
 		return
 	selected = -1
 	var r: Dictionary = run.finish_early()
@@ -1526,13 +1541,18 @@ func _on_claim() -> void:
 
 
 func _show_field_result(res: Dictionary) -> void:
+	_clear_overlay()
+	overlay_mode = "result"
+	var isl: Dictionary = res["island"]
 	var s := "[center][b][font_size=24]Остров %d пройден[/font_size][/b][/center]\n\n" % run.field_index
 	s += "Доход в казну: %s\n" % _fmt(res["prod"], true)
-	s += "Плата острова: %s" % _fmt(res["task"])
-	if res["missing"] > 0:
-		s += "  [color=#eb5757]не хватило %d → −%d%s[/color]\n" % [res["missing"], res["missing"] * int(data.run.get("life_per_missing", 1)), _heart_img()]
-	else:
-		s += "  [color=#6fcf97]оплачено[/color]\n"
+	if not res["reward"].is_empty():
+		s += "Награда за остров%s: %s\n" % [" (опасный!)" if isl.get("danger", false) else "", _fmt(res["reward"], true)]
+	if not res["task"].is_empty():
+		if res["task_done"]:
+			s += "[color=#6fcf97]Задание выполнено:[/color] %s\n" % _fmt(isl.get("task_reward", {}), true)
+		else:
+			s += "[color=#a9b4c0]Задание не выполнено — без награды[/color]\n"
 	if res["discontent"] > 0:
 		s += "[color=#eb5757]Недовольство: −%d%s[/color]\n" % [res["discontent"], _heart_img()]
 	if res["joy"] > 0:
@@ -1540,67 +1560,404 @@ func _show_field_result(res: Dictionary) -> void:
 	if res.has("boss"):
 		var b: Dictionary = res["boss"]
 		if res["boss_missing"] == 0:
-			s += "\n[color=#6fcf97][b]%s: оплачено %s[/b][/color]\n" % [b["name"], _fmt(b["cost"])]
+			s += "\n[color=#6fcf97][b]%s отбит: %d из %d[/b][/color]\n" % [b["name"], res["boss_total"], int(b["need"])]
 		else:
-			s += "\n[color=#eb5757][b]%s: не хватило %d[/b][/color] → −%d%s\n" % [b["name"], res["boss_missing"], res["boss_missing"] * int(b.get("life_per_missing", 1)), _heart_img()]
-	s += "Казна: %s\n" % _fmt(res["stock_after"])
-	s += "\nЖизни: %d → [b]%d[/b]%s" % [res["lives_before"], res["lives_after"], _heart_img()]
+			s += "\n[color=#eb5757][b]%s: %d из %d, не хватило %d[/b][/color] → −%d%s\n" % [b["name"], res["boss_total"], int(b["need"]), res["boss_missing"], res["boss_missing"] * int(b.get("life_per_missing", 1)), _heart_img()]
+	var c: Dictionary = res.get("contract", {})
+	if not c.is_empty():
+		if c["done"]:
+			s += "[color=#56ccf2]Контракт выполнен (%d/%d):[/color] %s\n" % [c["progress"], c["amount"], _fmt(c["reward"], true)]
+		else:
+			s += "[color=#a9b4c0]Контракт не выполнен (%d/%d)[/color]\n" % [c["progress"], c["amount"]]
+	s += "\nКазна: %s\n" % _fmt(res["stock_after"])
+	s += "Жизни: %d → [b]%d[/b]%s" % [res["lives_before"], res["lives_after"], _heart_img()]
 
-	_clear(overlay_buttons)
 	if run.victory:
 		s += "\n\n[center][b][font_size=26][color=#f2c94c]Победа! Земля покорена.[/color][/font_size][/b][/center]"
 		_overlay_button("Новый забег", _new_run)
 	elif run.game_over:
-		s += "\n\n[center][b][font_size=26][color=#eb5757]Забег окончен[/color][/font_size][/b]\nПолей пройдено: %d[/center]" % run.field_index
+		s += "\n\n[center][b][font_size=26][color=#eb5757]Забег окончен[/color][/font_size][/b]\nОстровов пройдено: %d[/center]" % run.field_index
 		_overlay_button("Новый забег", _new_run)
+	elif run.phase == "market":
+		_overlay_button("На рынок", _show_market)
 	else:
-		s += "\n\n[center][b]Выберите карту в колоду или отдохните:[/b][/center]"
-		for i in run.reward_options.size():
-			_reward_button(run.reward_options[i], _on_reward.bind(i))
-		_overlay_button("Отдых: +%d жизнь" % int(data.run.get("rest_heal", 1)), _on_reward.bind(-1))
-	_show_overlay(s)
+		_overlay_button("К карте маршрута", _show_map)
+	_show_overlay(s, 600)
 
 
-func _reward_button(id: String, cb: Callable) -> void:
-	var col: String = data.color_of(id)
+# ---------------------------------------------------------------- Карта маршрута
+
+func _show_map() -> void:
+	_clear_overlay()
+	overlay_mode = "map"
+	var sp: Dictionary = run.sprint_info()
+	var s := "[center][b][font_size=24]Спринт %d из %d · шаг %d из %d[/font_size][/b]\n" % [run.sprint + 1, run.sprints().size(), run.layer + 1, int(sp["layers"])]
+	var nb: Dictionary = run.next_boss()
+	if run.choices.size() == 1 and run.choices[0].has("boss"):
+		s += "[color=#eb5757]Босс! Произведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.[/color]" % [int(run.choices[0]["boss"]["need"]), _heart_img()]
+	else:
+		s += "Выберите следующий остров."
+		if not nb.is_empty():
+			s += " [color=#eb5757]%s[/color] через %d: нужно %d за остров." % [nb["name"], int(nb["islands_left"]), int(nb["need"])]
+	s += "[/center]"
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 18)
+	overlay_body.add_child(row)
+	for i in run.choices.size():
+		row.add_child(_island_card(run.choices[i], i))
+	var deck_b := _overlay_button("Колода (D)", _show_deck)
+	deck_b.custom_minimum_size = Vector2(150, 44)
+	_show_overlay(s, 700)
+
+
+func _island_card(isl: Dictionary, i: int) -> Button:
+	var danger: bool = isl.get("danger", false)
+	var boss: bool = isl.has("boss")
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(130, 70)
+	b.custom_minimum_size = Vector2(300, 0)
 	b.focus_mode = Control.FOCUS_NONE
-	b.text = data.obj_name(id)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("#232b38")
-	sb.border_color = Color(_res_color(col))
-	sb.set_border_width_all(2)
-	sb.border_width_top = 8
-	sb.set_corner_radius_all(6)
-	b.add_theme_stylebox_override("normal", sb)
-	var sh := sb.duplicate()
-	sh.bg_color = Color("#34404f")
-	b.add_theme_stylebox_override("hover", sh)
-	b.pressed.connect(cb)
-	overlay_buttons.add_child(b)
+	var accent := Color("#eb5757") if boss else (DANGER_COLOR if danger else (LAND_COLOR if isl["event"] != "" else Color("#6fcf97")))
+	for state in ["normal", "hover", "pressed"]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color("#2a3442") if state == "hover" else Color("#232b38")
+		sb.border_color = accent
+		sb.set_border_width_all(3 if state == "hover" else 2)
+		sb.border_width_top = 10
+		sb.set_corner_radius_all(8)
+		b.add_theme_stylebox_override(state, sb)
+	b.pressed.connect(_on_choose_island.bind(i))
+	var m := MarginContainer.new()
+	m.set_anchors_preset(Control.PRESET_FULL_RECT)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "bottom"]:
+		m.add_theme_constant_override("margin_" + side, 12)
+	m.add_theme_constant_override("margin_top", 18)
+	b.add_child(m)
+	var v := VBoxContainer.new()
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_theme_constant_override("separation", 8)
+	m.add_child(v)
+	var gc := CenterContainer.new()
+	gc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gc.add_child(_mini_field(isl["field"], 30))
+	v.add_child(gc)
+	var t := ""
+	if boss:
+		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nНужно произвести [b]%d[/b] всего\n" % [isl["boss"]["name"], int(isl["boss"]["need"])]
+	else:
+		var ev: Dictionary = data.events.get(isl["event"], {"name": "Спокойная земля"})
+		t += "[font_size=19][b][color=%s]%s[/color][/b][/font_size]\n" % [accent.to_html(false), ev["name"]]
+		if danger:
+			t += "[color=#ff8a70]Опасно: рушит постройки[/color]\n"
+	t += "Награда: %s\n" % (_fmt(isl.get("reward", {}), true) if not isl.get("reward", {}).is_empty() else "нет")
+	if not isl.get("task", {}).is_empty():
+		var tt := ""
+		for r in isl["task"]:
+			tt += "%d%s" % [int(isl["task"][r]), _img(r, 20)]
+		t += "Задание: произвести %s → %s" % [tt, _fmt(isl.get("task_reward", {}), true)]
+	else:
+		t += "[color=#8a96a3]Без задания[/color]"
+	var info := _rich_line("[center]%s[/center]" % t, 15)
+	v.add_child(info)
+	b.custom_minimum_size.y = 290
+	return b
 
 
-func _on_reward(i: int) -> void:
-	run.choose_reward(i)
+## Схема острова 4×4: земля, камни, озёра, готовые здания и местность.
+func _mini_field(f, cell: int) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = LandField.SIZE
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_theme_constant_override("h_separation", 3)
+	grid.add_theme_constant_override("v_separation", 3)
+	for i in LandField.N:
+		var c := PanelContainer.new()
+		c.custom_minimum_size = Vector2(cell, cell)
+		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var st := StyleBoxFlat.new()
+		st.set_corner_radius_all(4)
+		if not f.exists[i]:
+			st.bg_color = Color(0, 0, 0, 0)
+		else:
+			st.bg_color = TILE_FREE_COLOR
+			var tr: String = f.terrain[i]
+			if tr != "":
+				st.bg_color = Color(data.terrain[tr].get("tint", "#7fa04f"))
+			var id: String = f.content[i]
+			if id == "rock":
+				st.bg_color = Color("#8d8d93")
+			elif id == "lake":
+				st.bg_color = Color("#4a8fc8")
+			elif id != "" and data.is_building(id):
+				st.border_color = Color(_res_color(data.color_of(id)))
+				st.set_border_width_all(5)
+				st.bg_color = st.bg_color.darkened(0.3)
+		c.add_theme_stylebox_override("panel", st)
+		grid.add_child(c)
+	return grid
+
+
+func _on_choose_island(i: int) -> void:
+	run.choose_island(i)
 	_hide_overlay()
+	selected = -1
 	_full_refresh()
 	_announce_field()
 
 
-func _show_overlay(text: String) -> void:
+# ---------------------------------------------------------------- Рынок
+
+var market_tab := 0
+
+func _show_market() -> void:
+	_clear_overlay()
+	overlay_mode = "market"
+	var s := "[center][b][font_size=24][color=#f2c94c]Рынок[/color] · после спринта %d[/font_size][/b]\n" % (run.sprint + 1)
+	s += "Казна: %s     Жизни: [b]%d[/b]/%d%s[/center]" % [_fmt(run.stock), run.lives, int(data.run["lives"]), _heart_img()]
+	var tabs := HBoxContainer.new()
+	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs.add_theme_constant_override("separation", 8)
+	overlay_body.add_child(tabs)
+	for k in 2:
+		var tb := Button.new()
+		tb.text = ["Купить карту · лечение · контракт", "Улучшить или убрать карты колоды"][k]
+		tb.toggle_mode = true
+		tb.button_pressed = market_tab == k
+		tb.focus_mode = Control.FOCUS_NONE
+		tb.custom_minimum_size = Vector2(320, 40)
+		tb.add_theme_font_size_override("font_size", 16)
+		tb.pressed.connect(func(): market_tab = k; _show_market())
+		tabs.add_child(tb)
+	if market_tab == 0:
+		_market_shop()
+	else:
+		_market_deck()
+	var deck_b := _overlay_button("Колода (D)", _show_deck)
+	deck_b.custom_minimum_size = Vector2(150, 50)
+	var go := _overlay_button("В путь: спринт %d" % (run.sprint + 2), _on_leave_market)
+	go.custom_minimum_size = Vector2(220, 50)
+	_show_overlay(s, 1000)
+
+
+func _price_text(price: Dictionary, compact: bool = false) -> String:
+	var t := ""
+	for r in price:
+		if r == "any":
+			t += "%d люб." % int(price[r]) if compact else "%d любых" % int(price[r])
+		else:
+			t += "%d%s" % [int(price[r]), _img(r, 18)]
+	return t
+
+
+func _market_shop() -> void:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 14)
+	overlay_body.add_child(row)
+	for i in run.market["buy"].size():
+		var id: String = run.market["buy"][i]
+		var tile := _mini_card(id, 1, 200, 96)
+		var bought: bool = run.market["bought"][i]
+		var price: Dictionary = run.buy_price(id)
+		var btn := _rich_button("Куплено" if bought else "Купить за " + _price_text(price), bought or not run.can_afford(price))
+		btn.pressed.connect(func(): if run.buy(i): _show_market())
+		tile.get_child(0).add_child(btn)
+		row.add_child(tile)
+
+	var row2 := HBoxContainer.new()
+	row2.alignment = BoxContainer.ALIGNMENT_CENTER
+	row2.add_theme_constant_override("separation", 14)
+	overlay_body.add_child(row2)
+	# Лечение
+	var hb := _box_panel(Color("#eb5757"), 300)
+	var hv: VBoxContainer = hb.get_child(0)
+	hv.add_child(_rich_line("[b]Лекарь[/b]: +%d%s" % [int(run.market_cfg()["heal_lives"]), _heart_img(18)], 17))
+	var hprice := {"any": int(run.market_cfg()["heal_cost"])}
+	var heal_b := _rich_button("Лечиться за " + _price_text(hprice), run.lives >= int(data.run["lives"]) or not run.can_afford(hprice))
+	heal_b.pressed.connect(func(): if run.heal(): _show_market())
+	hv.add_child(heal_b)
+	row2.add_child(hb)
+	# Контракт
+	var c: Dictionary = run.market["contract"]
+	var cbx := _box_panel(Color("#56ccf2"), 420)
+	var cv: VBoxContainer = cbx.get_child(0)
+	cv.add_child(_rich_line("[b]Контракт на следующий спринт[/b]: произвести за спринт %d%s → %s" % [int(c["amount"]), _img(c["res"], 20), _fmt(c["reward"], true)], 16))
+	var taken: bool = run.market.get("contract_taken", false)
+	var cb := _rich_button("Взят" if taken else "Взять (бесплатно, без штрафа)", taken)
+	cb.pressed.connect(func(): if run.take_contract(): _show_market())
+	cv.add_child(cb)
+	row2.add_child(cbx)
+
+
+func _market_deck() -> void:
+	overlay_body.add_child(_rich_line("[center][color=#a9b4c0]Улучшение меняет одну карту на сильную (+), платится цветом карты. Удаление убирает одну карту.[/color][/center]", 14))
+	var grid := GridContainer.new()
+	grid.columns = 7
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	var cc := CenterContainer.new()
+	cc.add_child(grid)
+	overlay_body.add_child(cc)
+	var counts := _deck_counts()
+	var rprice := {"any": int(run.market_cfg()["remove_cost"])}
+	for id in counts:
+		var tile := _mini_card(id, counts[id], 132, 48, true)
+		var v: VBoxContainer = tile.get_child(0)
+		if data.can_upgrade(id):
+			var up_price: Dictionary = run.upgrade_price(id)
+			v.add_child(_rich_line("[center][color=#f2c94c]→[/color] %s[/center]" % _card_rules(id + "+", true), 12))
+			var ub := _rich_button("Улучшить " + _price_text(up_price, true), not run.can_afford(up_price), 12)
+			ub.pressed.connect(func(): if run.upgrade(id): _show_market())
+			v.add_child(ub)
+		var rb := _rich_button("Убрать " + _price_text(rprice, true), not run.can_afford(rprice) or run.all_cards().size() <= int(data.run["hand_size"]) + 2, 12)
+		rb.pressed.connect(func(): if run.remove(id): _show_market())
+		v.add_child(rb)
+		grid.add_child(tile)
+
+
+func _on_leave_market() -> void:
+	run.leave_market()
+	_show_map()
+
+
+## Карты колоды по id с количеством, в порядке: добыча, мастерские, жильё, городские; улучшенные после обычных.
+func _deck_counts() -> Dictionary:
+	var ids: Array = []
+	var counts := {}
+	for id in run.all_cards():
+		if not counts.has(id):
+			ids.append(id)
+			counts[id] = 0
+		counts[id] += 1
+	var order: Array = data.objects.keys()
+	ids.sort_custom(func(a, b):
+		var ia := order.find(data.base_id(a)) * 2 + (1 if data.is_upgraded(a) else 0)
+		var ib := order.find(data.base_id(b)) * 2 + (1 if data.is_upgraded(b) else 0)
+		return ia < ib)
+	var out := {}
+	for id in ids:
+		out[id] = counts[id]
+	return out
+
+
+## Маленькая карта: картинка, имя, (количество), правило.
+func _mini_card(id: String, count: int, width: int, pic_h: int, compact: bool = false) -> PanelContainer:
+	var up: bool = data.is_upgraded(id)
+	var p := _box_panel(Color("#f2c94c") if up else Color(_res_color(data.color_of(id))), width)
+	var v: VBoxContainer = p.get_child(0)
+	var pic := TextureRect.new()
+	pic.texture = _card_tex(id)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.custom_minimum_size = Vector2(0, pic_h)
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(pic)
+	var name: String = data.obj_name(id) + ("  ×%d" % count if count > 1 else "")
+	var title := _label(name, 15 if compact else 18, Color("#f2c94c") if up else Color.WHITE)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(title)
+	v.add_child(_rich_line("[center]%s[/center]" % _card_rules(id, compact), 12 if compact else 14))
+	return p
+
+
+func _box_panel(color: Color, width: int) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.custom_minimum_size = Vector2(width, 0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("#232b38")
+	sb.border_color = color
+	sb.set_border_width_all(2)
+	sb.border_width_top = 6
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(8)
+	p.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	p.add_child(v)
+	return p
+
+
+## Кнопка с BBCode-текстом (иконки ресурсов).
+func _rich_button(bb: String, disabled: bool, size: int = 15) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.disabled = disabled
+	b.custom_minimum_size = Vector2(0, 26 if size < 14 else 36)
+	var r := _rich_line("[center]%s[/center]" % bb, size)
+	r.set_anchors_preset(Control.PRESET_FULL_RECT)
+	r.offset_top = 4 if size < 14 else 8
+	if disabled:
+		r.modulate = Color(1, 1, 1, 0.45)
+	b.add_child(r)
+	return b
+
+
+# ---------------------------------------------------------------- Колода
+
+var _deck_back := ""
+
+func _show_deck() -> void:
+	if busy or overlay_mode == "result":
+		return
+	if overlay_mode == "deck":
+		_close_deck()
+		return
+	_deck_back = overlay_mode if overlay.visible else ""
+	_clear_overlay()
+	overlay_mode = "deck"
+	var all: Array = run.all_cards()
+	var ups := 0
+	for id in all:
+		if data.is_upgraded(id):
+			ups += 1
+	var s := "[center][b][font_size=24]Колода: %d %s[/font_size][/b]\n[color=#a9b4c0]В доборе %d, в сбросе %d, в руке %d. Улучшенных: %d.[/color][/center]" % [all.size(), _plural(all.size(), "карта", "карты", "карт"), run.deck.draw_pile.size(), run.deck.discard_pile.size(), run.hand.size(), ups]
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	var cc := CenterContainer.new()
+	cc.add_child(grid)
+	overlay_body.add_child(cc)
+	var counts := _deck_counts()
+	for id in counts:
+		grid.add_child(_mini_card(id, counts[id], 150, 76, true))
+	_overlay_button("Закрыть (D)", _close_deck)
+	_show_overlay(s, 960)
+
+
+func _close_deck() -> void:
+	match _deck_back:
+		"map": _show_map()
+		"market": _show_market()
+		_: _hide_overlay()
+
+
+# ---------------------------------------------------------------- Оверлей
+
+func _clear_overlay() -> void:
+	_clear(overlay_body)
+	_clear(overlay_buttons)
+
+
+func _show_overlay(text: String, width: int = 600) -> void:
+	overlay_box.custom_minimum_size = Vector2(width, 0)
+	overlay_box.size = Vector2.ZERO
 	overlay_text.text = text
+	overlay_body.visible = overlay_body.get_child_count() > 0
 	overlay.visible = true
 
 
 func _hide_overlay() -> void:
 	overlay.visible = false
+	overlay_mode = ""
 
 
-func _overlay_button(text: String, cb: Callable) -> void:
+func _overlay_button(text: String, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.custom_minimum_size = Vector2(150, 70)
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(cb)
 	overlay_buttons.add_child(b)
+	return b

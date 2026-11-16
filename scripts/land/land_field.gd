@@ -165,11 +165,11 @@ func score(data) -> Dictionary:
 		var col: String = data.color_of(id)
 		match role:
 			"base":
-				_add(cells[i], col, int(rules["base"]), "")
+				_add(cells[i], col, data.val(id, "base"), "")
 			"workshop":
-				_add(cells[i], col, int(rules["workshop_self"]), "")
+				_add(cells[i], col, data.val(id, "self"), "")
 			"housing":
-				_add(cells[i], "wild", int(data.objects[id].get("wild", 1)), "")
+				_add(cells[i], "wild", data.val(id, "wild"), "")
 		if data.is_producer(id):
 			var t: String = terrain[i]
 			if t != "":
@@ -190,14 +190,14 @@ func score(data) -> Dictionary:
 			var nrole: String = data.role(nid)
 			var ncol: String = data.color_of(nid)
 			if role == "workshop" and nrole == "base" and ncol == col:
-				_add(cells[i], col, int(rules["workshop_per_base"]), data.obj_name(nid))
+				_add(cells[i], col, data.val(id, "per_base"), data.obj_name(nid))
 				links.append({"a": i, "b": j, "type": "pair", "res": col})
-			elif id == "market" and data.is_producer(nid) and not market_colors.has(ncol):
+			elif data.base_id(id) == "market" and data.is_producer(nid) and not market_colors.has(ncol):
 				market_colors[ncol] = true
-				_add(cells[i], ncol, int(rules["market_per_color"]), "рынок")
+				_add(cells[i], ncol, data.val(id, "per_color"), "рынок")
 				links.append({"a": i, "b": j, "type": "house", "res": ncol})
-			elif id == "tavern" and nrole == "housing":
-				joy += int(rules["tavern_per_housing"])
+			elif data.base_id(id) == "tavern" and nrole == "housing":
+				joy += data.val(id, "per_housing")
 				links.append({"a": i, "b": j, "type": "tavern", "res": ""})
 			if j > i and data.is_producer(id) and data.is_producer(nid) and ncol != col:
 				discontent += int(rules["conflict"])

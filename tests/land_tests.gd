@@ -104,6 +104,7 @@ func test_lair() -> void:
 	f.content[5] = "mill"
 	var run := LandRun.new()
 	run.start(data, 1)
+	run.choose_island(0)
 	run.field = f
 	run.hand = ["tower"]
 	run.plays_left = 2
@@ -144,80 +145,158 @@ func test_events() -> void:
 func test_generation() -> void:
 	var rng := RandomNumberGenerator.new()
 	var bad := 0
+	var calm := 0
+	var danger := 0
+	var tasks := 0
 	for s in 300:
 		rng.seed = s
 		var fd: Dictionary = LandGen.make_field(data, rng, 1 + s % 12)
 		var f = fd["field"]
 		var n: int = f.cell_count()
-		if n < 8 or n > 10 or not f.is_contiguous() or f.free_cells().size() < 6 or fd["task"].is_empty():
+		if n < 8 or n > 10 or not f.is_contiguous() or f.free_cells().size() < 6:
 			bad += 1
-	_check(bad == 0, "300 полей: 8–10 клеток, связные, свободных ≥6 (плохих: %d)" % bad)
+		if fd["event"] == "":
+			calm += 1
+		if fd["danger"]:
+			danger += 1
+			if int(fd["reward"].get("wild", 0)) <= int(data.run["island_reward"].get("wild", 0)):
+				bad += 1
+		if not fd["task"].is_empty():
+			tasks += 1
+			if fd["task"].size() != 1:
+				bad += 1
+	_check(bad == 0, "300 полей: 8–10 клеток, связные, свободных ≥6, опасные с повышенной наградой (плохих: %d)" % bad)
+	_check(calm > 60 and danger < calm and danger > 0, "спокойных островов много (%d), опасных мало (%d)" % [calm, danger])
+	_check(tasks > 100 and tasks < 300, "задания не на каждом острове (%d из 300)" % tasks)
+
+
+## Прогон до конца с ботом; возвращает забег.
+func _play(seed: int, smart: bool = true):
+	var run := LandRun.new()
+	run.start(data, seed)
+	var guard := 0
+	while not run.game_over and guard < 300:
+		if run.phase == "map":
+			run.choose_island(LandBot.pick_island(run, smart))
+		elif run.phase == "market":
+			LandBot.shop(run, smart)
+			run.leave_market()
+		LandBot.play_turn(run, smart)
+		run.end_turn()
+		guard += 1
+	return run
 
 
 func test_run_flow() -> void:
 	var run := LandRun.new()
 	run.start(data, 7)
-	_check(run.hand.size() == 4 and run.turn == 1 and run.field_index == 1, "старт: рука 4, ход 1, поле 1")
-	_check(not run.next_field.is_empty(), "следующее поле видно заранее")
+	_check(run.phase == "map" and run.choices.size() == 2, "забег начинается с карты: выбор из 2 островов")
+	run.choose_island(1)
+	_check(run.phase == "island" and run.hand.size() == 4 and run.turn == 1 and run.field_index == 1, "остров выбран: рука 4, ход 1")
 	var ev := run.event_type
 	LandBot.play_turn(run)
 	var r: Dictionary = run.end_turn()
 	_check(r.has("land") and run.turn == 2 and run.hand.size() == 4, "после хода земли — ход 2, рука снова 4")
-	_check(run.event_type == ev, "тип события поля не меняется")
+	_check(run.event_type == ev, "тип события острова не меняется")
 	run.end_turn()
+	var stock_before: Dictionary = run.stock.duplicate()
+	var prod: Dictionary = run.score()["total"]
 	r = run.end_turn()
-	_check(r["field_done"], "после 3 ходов поле завершено")
-	_check(r["result"]["lives_after"] == run.lives, "жизни посчитаны")
-	if not run.game_over:
-		run.choose_reward(0)
-		_check(run.field_index == 2 and run.turn == 1, "следующее поле")
-	# Полный забег ботом не падает
-	var run2 := LandRun.new()
-	run2.start(data, 11)
-	var guard := 0
-	while not run2.game_over and guard < 200:
-		LandBot.play_turn(run2)
-		var rr: Dictionary = run2.end_turn()
-		if rr.get("field_done", false) and not run2.game_over:
-			run2.choose_reward(0)
-		guard += 1
-	_check(run2.game_over, "забег ботом доходит до конца (поле %d, жизни %d)" % [run2.field_index, run2.lives])
+	_check(r["field_done"] and run.phase == "map" and run.choices.size() == 2, "после 3 ходов — снова карта")
+	var ok := true
+	for res in prod:
+		if int(run.stock[res]) < int(stock_before[res]) + int(prod[res]):
+			ok = false
+	_check(ok, "весь доход острова ушёл в казну, платы нет")
+	# Конец первого спринта — рынок
+	for _k in 2:
+		run.choose_island(0)
+		for _t in 3:
+			run.end_turn()
+	_check(run.phase == "market" and run.market["buy"].size() == 3, "после спринта — рынок с 3 картами")
+	run.leave_market()
+	_check(run.phase == "map" and run.sprint == 1, "с рынка — в следующий спринт")
+	# Босс на последнем острове 2-го спринта
+	run.choose_island(0)
+	for _t in 3:
+		run.end_turn()
+	run.choose_island(0)
+	for _t in 3:
+		run.end_turn()
+	_check(run.choices.size() == 1 and run.choices[0].has("boss"), "перед боссом — один остров с боссом")
+	run.choose_island(0)
+	for _t in 2:
+		run.end_turn()
+	var lives := run.lives
+	var need := int(run.island["boss"]["need"]) - run.total_of(run.score())
+	r = run.end_turn()
+	_check(r["result"]["boss_missing"] == maxi(0, need), "босс считает весь доход острова (не хватило %d)" % r["result"]["boss_missing"])
+	_check(run.game_over or run.lives <= lives - r["result"]["boss_missing"] + r["result"]["joy"], "нехватка на боссе снимает жизни")
+	var run2 = _play(11)
+	_check(run2.game_over, "забег ботом доходит до конца (остров %d, жизни %d)" % [run2.field_index, run2.lives])
+	var wins := 0
+	for s in 10:
+		if _play(100 + s).victory:
+			wins += 1
+	_check(wins >= 4, "жадный бот выигрывает часть забегов (%d/10)" % wins)
 
 
 func test_finish_early() -> void:
 	var run := LandRun.new()
 	run.start(data, 9)
-	_check(run.finish_early().is_empty(), "без платы острова досрочно не закончить")
-	for r in run.task:
-		run.stock[r] = 99
+	var k := 0
+	while run.choices[k]["task"].is_empty() and k < run.choices.size() - 1:
+		k += 1
+	run.choose_island(k)
+	if run.task.is_empty():
+		_check(run.finish_early().is_empty(), "без задания остров досрочно не забрать")
+		return
+	_check(run.finish_early().is_empty(), "задание не выполнено — досрочно не забрать")
+	var f = run.field
+	var res: String = run.task.keys()[0]
+	var base: String = {"food": "field", "gold": "mine", "force": "tower"}[res]
+	for c in f.free_cells():
+		f.place_building(data, c, base)
+	var wild_before := int(run.stock["wild"])
 	var r2: Dictionary = run.finish_early()
-	_check(r2.get("field_done", false) and r2["result"]["missing"] == 0, "плата есть — остров можно забрать досрочно")
-	_check(int(run.stock[run.task.keys()[0]]) < 99, "плата острова списана из казны")
+	_check(r2.get("field_done", false) and r2["result"]["task_done"], "задание выполнено — остров можно забрать")
+	_check(int(run.stock["wild"]) >= wild_before + int(run.island["task_reward"]["wild"]), "награда за задание — в казну")
+
 
 func test_treasury() -> void:
-	var pool := {"food": 2, "gold": 0, "force": 0, "wild": 3}
-	var p: Dictionary = LandRun.pay(pool, {"food": 4, "gold": 2})
-	_check(p["missing"] == 1 and pool["wild"] == 0 and pool["food"] == 0, "джокеры закрывают нехватку, остаток — недостача (%s)" % str(p))
 	var run := LandRun.new()
 	run.start(data, 4)
-	run.stock = {"food": 10, "gold": 10, "force": 10, "wild": 0}
-	var before := 0
-	for r in run.stock:
-		before += int(run.stock[r])
-	for _t in 3:
-		run.end_turn()
-	var after := 0
-	for r in run.stock:
-		after += int(run.stock[r])
-	var need := 0
-	for r in run.task:
-		need += int(run.task[r])
-	_check(not run.game_over, "казна пережила остров")
+	run.phase = "market"
+	run._make_market()
+	var id: String = run.market["buy"][0]
+	run.stock = data.zero_res()
+	_check(not run.buy(0), "без денег не купить")
+	run.stock = {"food": 0, "gold": 0, "force": 0, "wild": 20}
+	var n: int = run.all_cards().size()
+	_check(run.buy(0) and run.all_cards().size() == n + 1 and id in run.all_cards(), "покупка добавляет карту в колоду")
+	_check(not run.buy(0), "одну карту не купить дважды")
+	run.stock = {"food": 20, "gold": 0, "force": 0, "wild": 0}
+	_check(run.upgrade("field") and "field+" in run.all_cards() and run.stock["food"] == 20 - int(data.run["market"]["upgrade_cost"]), "улучшение Поля платится едой")
+	_check(run.all_cards().size() == n + 1, "улучшение заменяет карту, а не добавляет")
+	_check(not run.upgrade("field+"), "улучшенное не улучшить второй раз")
+	var f := _square()
+	f.place_building(data, 4, "field+")
+	_check(int(f.score(data)["total"]["food"]) == 3, "Поле+ даёт +3")
+	var before := run.all_cards().count("mine")
+	run.stock = {"food": 0, "gold": 5, "force": 5, "wild": 0}
+	_check(run.remove("mine") and run.all_cards().count("mine") == before - 1, "удаление карты")
+	run.lives = 5
+	run.stock = {"food": 10, "gold": 0, "force": 0, "wild": 0}
+	_check(run.heal() and run.lives == 5 + int(data.run["market"]["heal_lives"]), "лечение")
+	_check(run.take_contract() and run.contract["sprint"] == run.sprint + 1, "контракт на следующий спринт")
+	run.leave_market()
+	_check(run.phase == "map" and run.sprint == 1, "уход с рынка")
 
 
 func test_undo() -> void:
 	var run := LandRun.new()
 	run.start(data, 3)
+	run.choose_island(0)
 	var before: Array = run.hand.duplicate()
 	var cell: int = run.field.free_cells()[0]
 	run.place(0, cell)

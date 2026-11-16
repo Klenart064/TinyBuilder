@@ -17,29 +17,28 @@ func _initialize() -> void:
 
 func _run() -> void:
 	await _frames(5)
+	# Карта маршрута в начале забега
+	main._new_run(4)
+	await _frames(8)
+	_save("land_map.png")
+	main._show_deck()
+	await _frames(8)
+	_save("land_deck.png")
+	main._close_deck()
+	main._on_choose_island(0)
+	main.toast.visible = false
 	for ev in ["swap", "lair", "destroy", "growth", "collapse"]:
-		main._new_run(4)
-		main.toast.visible = false
 		var run = main.run
 		run.event_type = ev
+		run.island["danger"] = ev in ["destroy", "collapse"]
 		run.intent = main.LandEvents.plan(ev, run.field, run.data, run.rng)
-		# Пара построек для наглядности
-		var free: Array = run.field.free_cells()
-		if ev != "growth":
-			run.place(0, free[0])
-			free = run.field.free_cells()
-			run.place(0, free[free.size() - 1])
-			run.intent = main.LandEvents.plan(ev, run.field, run.data, run.rng)
 		main._full_refresh()
 		main.selected = 0
 		main.hover = run.field.free_cells()[0]
-		run.plays_left = 1
 		main._full_refresh()
 		await _frames(8)
 		_save("land_%s.png" % ev)
-	# Насыщенная раскладка: пары, Дом, конфликт, озеро, местность, логово
-	main._new_run(4)
-	main.toast.visible = false
+	# Насыщенная раскладка с заданием
 	var r = main.run
 	var f = r.field
 	for i in 16:
@@ -47,7 +46,7 @@ func _run() -> void:
 		f.content[i] = ""
 		f.terrain[i] = ""
 		f.facing[i] = -1
-	f.content[5] = "field"
+	f.content[5] = "field+"
 	f.content[6] = "mill"
 	f.content[9] = "house"
 	f.content[10] = "mine"
@@ -58,8 +57,12 @@ func _run() -> void:
 	f.content[2] = "smithy"
 	f.terrain[13] = "swamp"
 	r.event_type = "swap"
+	r.island["danger"] = false
+	r.task = {"food": 6}
+	r.island["task"] = r.task
 	r.intent = {"type": "swap", "cells": [8, 2], "target": -1}
-	r.hand = ["field", "mill", "mine", "barracks"]
+	r.hand = ["field+", "mill", "mine", "barracks"]
+	r.stock = {"food": 9, "gold": 4, "force": 6, "wild": 3}
 	main.selected = 0
 	main.hover = 8
 	main._full_refresh()
@@ -69,32 +72,54 @@ func _run() -> void:
 	await _frames(5)
 	_save("land_rules.png")
 	main._toggle_rules()
-	r.hand = ["manor", "market", "tavern", "house"]
-	r.stock = {"food": 4, "gold": 7, "force": 2, "wild": 1}
+	# Итог острова
 	main.selected = -1
 	main.hover = -1
-	main._full_refresh()
-	await _frames(8)
-	_save("land_cards2.png")
-	for res in r.task:
-		r.stock[res] = int(r.task[res])
-	main._full_refresh()
-	await _frames(5)
-	_save("land_claim.png")
-	main._new_run(4)
-	main.toast.visible = false
-	# Ход земли с анимацией и итог поля
-	main.run.event_type = "swap"
-	main.run.intent = main.LandEvents.plan("swap", main.run.field, main.run.data, main.run.rng)
-	main.selected = -1
-	main._on_end_turn()
-	await _seconds(0.35)
-	_save("land_anim.png")
-	await _seconds(1.0)
-	main.run.end_turn()
+	r.end_turn()
+	r.end_turn()
 	main._on_end_turn()
 	await _seconds(1.5)
 	_save("land_result.png")
+	# Рынок: прокрутить спринт ботом
+	main._hide_overlay()
+	while r.phase != "market":
+		if r.phase == "map":
+			r.choose_island(0)
+		for _t in 3:
+			r.end_turn()
+	r.stock = {"food": 14, "gold": 9, "force": 11, "wild": 5}
+	r.lives = 8
+	main._full_refresh()
+	main.market_tab = 0
+	main._show_market()
+	await _frames(8)
+	_save("land_market.png")
+	main.market_tab = 1
+	main._show_market()
+	await _frames(8)
+	_save("land_market_deck.png")
+	r.upgrade("mill")
+	r.upgrade("field")
+	main._show_market()
+	main._on_leave_market()
+	await _frames(8)
+	_save("land_map2.png")
+	# Босс
+	while not (r.choices.size() == 1 and r.choices[0].has("boss")):
+		r.choose_island(0)
+		for _t in 3:
+			r.end_turn()
+	main._show_map()
+	await _frames(8)
+	_save("land_boss_map.png")
+	main._on_choose_island(0)
+	main.toast.visible = false
+	var free: Array = r.field.free_cells()
+	r.hand = ["field+", "mill+", "manor", "field"]
+	r.place(0, free[0])
+	main._full_refresh()
+	await _frames(8)
+	_save("land_boss.png")
 	quit()
 
 

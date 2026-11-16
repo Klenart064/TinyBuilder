@@ -4,7 +4,7 @@ extends RefCounted
 const LandField = preload("res://scripts/land/land_field.gd")
 
 
-## Новое поле: {"field", "event": id, "task": {res: n}}
+## Новый остров: {"field", "event": id или "" (спокойно), "task": {res: n} или {}, "danger": bool, "reward": {res: n}, "task_reward": {res: n}}
 static func make_field(data, rng: RandomNumberGenerator, index: int) -> Dictionary:
 	var cfg: Dictionary = data.run
 	var field = null
@@ -14,7 +14,17 @@ static func make_field(data, rng: RandomNumberGenerator, index: int) -> Dictiona
 		_place_terrain(field, data, rng)
 		if field.free_cells().size() >= int(cfg.get("min_free_cells", 6)):
 			break
-	return {"field": field, "event": pick_event(data, rng, index), "task": make_task(data, rng, index)}
+	var ev := pick_event(data, rng, index)
+	var danger: bool = data.events.get(ev, {}).get("danger", false)
+	var task := {}
+	if rng.randf() < float(cfg.get("task_chance", 0.5)):
+		task = make_task(data, rng, index)
+	var reward: Dictionary = (cfg.get("danger_reward", {}) if danger else cfg.get("island_reward", {})).duplicate()
+	var task_reward: Dictionary = cfg.get("task_reward", {}).duplicate()
+	if danger:
+		for r in task_reward:
+			task_reward[r] = int(task_reward[r]) * int(cfg.get("danger_task_mult", 2))
+	return {"field": field, "event": ev, "task": task, "danger": danger, "reward": reward, "task_reward": task_reward}
 
 
 ## Связный кусок из n клеток в рамке 4×4 (растёт от случайной клетки).
@@ -72,6 +82,8 @@ static func _place_terrain(field, data, rng: RandomNumberGenerator) -> void:
 
 
 static func pick_event(data, rng: RandomNumberGenerator, index: int) -> String:
+	if rng.randf() < float(data.run.get("calm_chance", 0.0)):
+		return ""
 	var pool := {}
 	for e in data.run["events"]:
 		if index >= int(e.get("from_field", 1)):
@@ -79,22 +91,17 @@ static func pick_event(data, rng: RandomNumberGenerator, index: int) -> String:
 	return _weighted(rng, pool)
 
 
-## Задание поля: шаблон по номеру поля, числа раздаются случайным ресурсам.
+## Задание острова: произвести на острове amount одного цвета.
 static func make_task(data, rng: RandomNumberGenerator, index: int) -> Dictionary:
-	var tiers: Array = data.run["tasks"]
-	var tier: Dictionary = tiers[tiers.size() - 1]
-	for t in tiers:
-		if index >= int(t["fields"][0]) and index <= int(t["fields"][1]):
+	var tier: Dictionary = {}
+	for t in data.run["tasks"]:
+		if index >= int(t["from_island"]):
 			tier = t
-			break
-	var patterns: Array = tier["patterns"]
-	var pat: Array = patterns[rng.randi_range(0, patterns.size() - 1)].duplicate()
-	var res: Array = data.colors.duplicate()
-	_shuffle(res, rng)
-	var task := {}
-	for k in mini(pat.size(), res.size()):
-		task[res[k]] = int(pat[k])
-	return task
+	if tier.is_empty():
+		return {}
+	var colors: Array = data.colors
+	var r: String = colors[rng.randi_range(0, colors.size() - 1)]
+	return {r: _rand_range(rng, tier["amount"])}
 
 
 static func _rand_range(rng: RandomNumberGenerator, r: Array) -> int:

@@ -175,7 +175,7 @@ static func describe(intent: Dictionary) -> String:
 			return "Подсвеченная клетка обрушится" if intent["target"] >= 0 else "Земля держится"
 		"lair":
 			return "На подсвеченной клетке появится Логово" if intent["target"] >= 0 else "Логову негде появиться"
-	return ""
+	return "Земля спокойна"
 
 
 static func _is_edge(field, i: int) -> bool:
