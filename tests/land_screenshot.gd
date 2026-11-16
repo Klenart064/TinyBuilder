@@ -106,6 +106,8 @@ func _run() -> void:
 	_save("land_map2.png")
 	# Босс
 	while not (r.choices.size() == 1 and r.choices[0].has("boss")):
+		if r.phase == "market":
+			r.leave_market()
 		r.choose_island(0)
 		for _t in 3:
 			r.end_turn()

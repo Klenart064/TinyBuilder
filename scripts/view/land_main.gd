@@ -1587,81 +1587,188 @@ func _show_field_result(res: Dictionary) -> void:
 
 # ---------------------------------------------------------------- Карта маршрута
 
+var map_detail: VBoxContainer
+var map_hover: Dictionary = {}
+
 func _show_map() -> void:
 	_clear_overlay()
 	overlay_mode = "map"
 	var sp: Dictionary = run.sprint_info()
-	var s := "[center][b][font_size=24]Спринт %d из %d · шаг %d из %d[/font_size][/b]\n" % [run.sprint + 1, run.sprints().size(), run.layer + 1, int(sp["layers"])]
-	var nb: Dictionary = run.next_boss()
-	if run.choices.size() == 1 and run.choices[0].has("boss"):
-		s += "[color=#eb5757]Босс! Произведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.[/color]" % [int(run.choices[0]["boss"]["need"]), _heart_img()]
-	else:
-		s += "Выберите следующий остров."
-		if not nb.is_empty():
-			s += " [color=#eb5757]%s[/color] через %d: нужно %d за остров." % [nb["name"], int(nb["islands_left"]), int(nb["need"])]
-	s += "[/center]"
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 18)
-	overlay_body.add_child(row)
-	for i in run.choices.size():
-		row.add_child(_island_card(run.choices[i], i))
+	var s := "[center][b][font_size=24]Карта забега · спринт %d из %d, шаг %d из %d[/font_size][/b]\n" % [run.sprint + 1, run.sprints().size(), run.layer + 1, int(sp["layers"])]
+	s += "[color=#a9b4c0]Светлая рамка — куда можно пойти сейчас. Наведите на остров, чтобы увидеть подробности.[/color][/center]"
+	overlay_body.add_child(_map_canvas())
+	map_detail = VBoxContainer.new()
+	map_detail.custom_minimum_size = Vector2(0, 150)
+	overlay_body.add_child(map_detail)
+	map_hover = run.choices[0] if not run.choices.is_empty() else {}
+	_refresh_map_detail()
 	var deck_b := _overlay_button("Колода (D)", _show_deck)
 	deck_b.custom_minimum_size = Vector2(150, 44)
-	_show_overlay(s, 700)
+	_show_overlay(s, 1220)
 
 
-func _island_card(isl: Dictionary, i: int) -> Button:
-	var danger: bool = isl.get("danger", false)
-	var boss: bool = isl.has("boss")
+const MAP_COL := 72.0
+const MAP_ROW := 74.0
+const MAP_NODE := 60.0
+
+## Холст карты: колонки — шаги (между спринтами — рынок), строки — дорожки.
+func _map_canvas() -> Control:
+	var lanes := int(data.run.get("lanes", 3))
+	var canvas := Control.new()
+	var cols := 0
+	for si in run.run_map.size():
+		cols += run.run_map[si].size() + (1 if si < run.run_map.size() - 1 else 0)
+	canvas.custom_minimum_size = Vector2(cols * MAP_COL + 10, lanes * MAP_ROW + 34)
+	var pos := {}      # остров (по id) → центр
+	var markets := []  # центры рынков
+	var col := 0
+	var heads := []
+	for si in run.run_map.size():
+		var start_x := col * MAP_COL
+		for li in run.run_map[si].size():
+			for isl in run.run_map[si][li]:
+				var y := 30 + (float(isl["lane"]) + 0.5) * MAP_ROW
+				var c := Vector2(col * MAP_COL + MAP_COL / 2 + 5, y)
+				pos[_isl_key(isl)] = c
+				canvas.add_child(_map_node(isl, c))
+			col += 1
+		heads.append([start_x, col * MAP_COL, si])
+		if si < run.run_map.size() - 1:
+			var mc := Vector2(col * MAP_COL + MAP_COL / 2 + 5, 30 + lanes * MAP_ROW / 2.0)
+			markets.append(mc)
+			var ml := _label("Рынок", 14, Color("#f2c94c"))
+			ml.position = mc - Vector2(24, 34)
+			canvas.add_child(ml)
+			col += 1
+	for h in heads:
+		var lbl := _label("Спринт %d" % (h[2] + 1), 15, Color.WHITE if h[2] == run.sprint else Color("#8a96a3"))
+		lbl.position = Vector2(h[0] + 8, 0)
+		canvas.add_child(lbl)
+	canvas.draw.connect(func(): _draw_map(canvas, pos, markets))
+	return canvas
+
+
+func _isl_key(isl: Dictionary) -> String:
+	return "%d_%d_%d" % [int(isl["sprint"]), int(isl["layer"]), int(isl["lane"])]
+
+
+func _draw_map(canvas: Control, pos: Dictionary, markets: Array) -> void:
+	var dim := Color(1, 1, 1, 0.18)
+	var lit := Color("#f2c94c")
+	for si in run.run_map.size():
+		var layers: Array = run.run_map[si]
+		for li in layers.size():
+			for isl in layers[li]:
+				var a: Vector2 = pos[_isl_key(isl)]
+				if li < layers.size() - 1:
+					for t in layers[li + 1]:
+						if int(t["lane"]) in isl["next"]:
+							var on: bool = isl["visited"] and t["visited"]
+							canvas.draw_line(a, pos[_isl_key(t)], lit if on else dim, 4.0 if on else 2.0, true)
+				elif si < markets.size():
+					canvas.draw_line(a, markets[si], lit if isl["visited"] else dim, 4.0 if isl["visited"] else 2.0, true)
+			if li == 0 and si > 0:
+				for isl in layers[0]:
+					canvas.draw_line(markets[si - 1], pos[_isl_key(isl)], lit if isl["visited"] else dim, 4.0 if isl["visited"] else 2.0, true)
+	for m in markets:
+		canvas.draw_circle(m, 16, Color("#3a3220"))
+		canvas.draw_arc(m, 16, 0, TAU, 24, Color("#f2c94c"), 3, true)
+		var tex := _icon("gold")
+		canvas.draw_texture_rect(tex, Rect2(m - Vector2(11, 11), Vector2(22, 22)), false)
+
+
+## Остров на карте: схема 4×4 в рамке цвета земли; доступные — яркие и кликабельные.
+func _map_node(isl: Dictionary, c: Vector2) -> Button:
+	var avail: bool = run.phase == "map" and isl in run.choices
+	var visited: bool = isl["visited"]
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(300, 0)
 	b.focus_mode = Control.FOCUS_NONE
-	var accent := Color("#eb5757") if boss else (DANGER_COLOR if danger else (LAND_COLOR if isl["event"] != "" else Color("#6fcf97")))
-	for state in ["normal", "hover", "pressed"]:
+	b.size = Vector2(MAP_NODE, MAP_NODE)
+	b.position = c - b.size / 2
+	var accent := _island_accent(isl)
+	for state in ["normal", "hover", "pressed", "disabled"]:
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color("#2a3442") if state == "hover" else Color("#232b38")
-		sb.border_color = accent
-		sb.set_border_width_all(3 if state == "hover" else 2)
-		sb.border_width_top = 10
+		sb.bg_color = Color("#2a3442") if state == "hover" else Color("#1b222c")
+		sb.border_color = Color.WHITE if (avail and state == "hover") else accent
+		sb.set_border_width_all(4 if avail else 2)
 		sb.set_corner_radius_all(8)
+		if avail:
+			sb.shadow_color = Color(accent, 0.6)
+			sb.shadow_size = 6
 		b.add_theme_stylebox_override(state, sb)
-	b.pressed.connect(_on_choose_island.bind(i))
-	var m := MarginContainer.new()
-	m.set_anchors_preset(Control.PRESET_FULL_RECT)
-	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "right", "bottom"]:
-		m.add_theme_constant_override("margin_" + side, 12)
-	m.add_theme_constant_override("margin_top", 18)
-	b.add_child(m)
-	var v := VBoxContainer.new()
-	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_theme_constant_override("separation", 8)
-	m.add_child(v)
-	var gc := CenterContainer.new()
-	gc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	gc.add_child(_mini_field(isl["field"], 30))
-	v.add_child(gc)
-	var t := ""
-	if boss:
-		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nНужно произвести [b]%d[/b] всего\n" % [isl["boss"]["name"], int(isl["boss"]["need"])]
+	if not avail:
+		b.modulate = Color(1, 1, 1, 0.45 if visited or isl["layer"] < run.layer or isl["sprint"] < run.sprint else 0.8)
+	var cc := CenterContainer.new()
+	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if isl.has("boss"):
+		var bl := _label("БОСС", 15, Color("#eb5757"))
+		cc.add_child(bl)
 	else:
-		var ev: Dictionary = data.events.get(isl["event"], {"name": "Спокойная земля"})
-		t += "[font_size=19][b][color=%s]%s[/color][/b][/font_size]\n" % [accent.to_html(false), ev["name"]]
-		if danger:
-			t += "[color=#ff8a70]Опасно: рушит постройки[/color]\n"
-	t += "Награда: %s\n" % (_fmt(isl.get("reward", {}), true) if not isl.get("reward", {}).is_empty() else "нет")
+		cc.add_child(_mini_field(isl["field"], 10))
+	b.add_child(cc)
+	if not isl.get("task", {}).is_empty():
+		var tr := _icon_rect(_icon(isl["task"].keys()[0]), 20)
+		tr.position = Vector2(MAP_NODE - 16, -6)
+		b.add_child(tr)
+	if visited:
+		var v := _label("✔", 18, Color("#6fcf97"))
+		v.position = Vector2(-4, -10)
+		b.add_child(v)
+	b.mouse_entered.connect(func(): map_hover = isl; _refresh_map_detail())
+	if avail:
+		b.pressed.connect(_on_choose_island.bind(run.choices.find(isl)))
+	return b
+
+
+func _island_accent(isl: Dictionary) -> Color:
+	if isl.has("boss"):
+		return Color("#eb5757")
+	if isl.get("danger", false):
+		return DANGER_COLOR
+	return LAND_COLOR if isl["event"] != "" else Color("#6fcf97")
+
+
+## Подробности острова под картой.
+func _refresh_map_detail() -> void:
+	if map_detail == null or not is_instance_valid(map_detail):
+		return
+	_clear(map_detail)
+	if map_hover.is_empty():
+		return
+	var isl := map_hover
+	var avail: bool = isl in run.choices
+	var p := _box_panel(_island_accent(isl), 760)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 16)
+	p.get_child(0).add_child(h)
+	h.add_child(_mini_field(isl["field"], 24))
+	var t := ""
+	if isl.has("boss"):
+		t += "[font_size=20][b][color=#eb5757]Босс: %s[/color][/b][/font_size]\nПроизведите на острове [b]%d[/b] всего, иначе −1%s за каждую недостающую единицу.\n" % [isl["boss"]["name"], int(isl["boss"]["need"]), _heart_img()]
+	else:
+		var ev: Dictionary = data.events.get(isl["event"], {"name": "Спокойная земля", "desc": "Земля на этом острове не двигается."})
+		t += "[font_size=20][b][color=%s]%s[/color][/b][/font_size]%s\n[color=#c9d1d9]%s[/color]\n" % [_island_accent(isl).to_html(false), ev["name"], "  [color=#ff8a70]опасно[/color]" if isl.get("danger", false) else "", ev.get("desc", "")]
+	t += "Награда: %s" % (_fmt(isl.get("reward", {}), true) if not isl.get("reward", {}).is_empty() else "нет")
 	if not isl.get("task", {}).is_empty():
 		var tt := ""
 		for r in isl["task"]:
 			tt += "%d%s" % [int(isl["task"][r]), _img(r, 20)]
-		t += "Задание: произвести %s → %s" % [tt, _fmt(isl.get("task_reward", {}), true)]
-	else:
-		t += "[color=#8a96a3]Без задания[/color]"
-	var info := _rich_line("[center]%s[/center]" % t, 15)
-	v.add_child(info)
-	b.custom_minimum_size.y = 290
-	return b
+		t += "     Задание: произвести %s → %s" % [tt, _fmt(isl.get("task_reward", {}), true)]
+	var info := _rich_line(t, 15)
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(info)
+	if avail:
+		var go := Button.new()
+		go.text = "Плыть сюда"
+		go.focus_mode = Control.FOCUS_NONE
+		go.custom_minimum_size = Vector2(140, 60)
+		go.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		go.pressed.connect(_on_choose_island.bind(run.choices.find(isl)))
+		h.add_child(go)
+	var cc := CenterContainer.new()
+	cc.add_child(p)
+	map_detail.add_child(cc)
 
 
 ## Схема острова 4×4: земля, камни, озёра, готовые здания и местность.

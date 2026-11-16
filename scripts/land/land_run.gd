@@ -25,6 +25,9 @@ var layer := 0            # шаг внутри спринта (0…layers-1)
 var island: Dictionary = {}
 ## Варианты следующего острова (карта): [остров, ...]
 var choices: Array = []
+## Карта забега: [спринт][шаг] → [остров, ...]; pos_lane — дорожка, где стоит игрок (-1 — начало спринта)
+var run_map: Array = []
+var pos_lane := -1
 ## Что делать после итога острова: "map", "market", "over"
 var phase := "map"
 
@@ -75,6 +78,8 @@ func start(data_, seed: int = -1) -> void:
 	turn = 1
 	plays_left = 0
 	phase = "map"
+	pos_lane = -1
+	_gen_map()
 	_make_choices()
 
 
@@ -118,18 +123,76 @@ func next_boss() -> Dictionary:
 	return {}
 
 
+## Вся карта забега генерируется сразу: map[спринт][шаг] = [остров, ...].
+## У острова "lane" (дорожка) и "next" — дорожки следующего шага, куда из него можно пойти.
+## Последний шаг спринта с боссом — один остров. После спринта — рынок, с него можно на любой остров.
+func _gen_map() -> void:
+	run_map = []
+	var lanes := int(data.run.get("lanes", 3))
+	var idx := 0
+	for si in sprints().size():
+		var s: Dictionary = sprints()[si]
+		var layers := []
+		for li in int(s["layers"]):
+			idx += 1
+			var boss: Dictionary = s["boss"] if s.has("boss") and li == int(s["layers"]) - 1 else {}
+			var n := 1 if not boss.is_empty() else lanes
+			var row := []
+			for k in n:
+				var isl: Dictionary = LandGen.make_field(data, rng, idx)
+				isl["lane"] = k if boss.is_empty() else (lanes - 1) / 2
+				isl["sprint"] = si
+				isl["layer"] = li
+				isl["next"] = []
+				isl["visited"] = false
+				if not boss.is_empty():
+					isl["boss"] = boss
+					isl["task"] = {}
+					isl["event"] = ""
+					isl["danger"] = false
+					isl["reward"] = s.get("boss_reward", isl["reward"])
+				row.append(isl)
+			layers.append(row)
+		# Связи между шагами: соседние дорожки, у каждого острова 1–2 выхода, у каждого есть вход
+		for li in layers.size() - 1:
+			var cur: Array = layers[li]
+			var nxt: Array = layers[li + 1]
+			if nxt.size() == 1 or cur.size() == 1:
+				for isl in cur:
+					isl["next"] = range(nxt.size())
+				continue
+			for isl in cur:
+				var l: int = isl["lane"]
+				var opts := [l]
+				if l > 0 and rng.randf() < 0.5:
+					opts.append(l - 1)
+				if l < nxt.size() - 1 and rng.randf() < 0.5:
+					opts.append(l + 1)
+				isl["next"] = opts
+			for t in nxt.size():
+				var has_in := false
+				for isl in cur:
+					if t in isl["next"]:
+						has_in = true
+				if not has_in:
+					cur[clampi(t, 0, cur.size() - 1)]["next"].append(t)
+		run_map.append(layers)
+
+
+## Острова, доступные на текущем шаге (по пути от предыдущего острова).
 func _make_choices() -> void:
+	var row: Array = run_map[sprint][layer]
+	if layer == 0 or pos_lane < 0:
+		choices = row.duplicate()
+		return
+	var prev: Dictionary = {}
+	for isl in run_map[sprint][layer - 1]:
+		if int(isl["lane"]) == pos_lane:
+			prev = isl
 	choices = []
-	var boss := _boss_here()
-	var n := 1 if not boss.is_empty() else int(data.run.get("choices", 2))
-	for _k in n:
-		var isl: Dictionary = LandGen.make_field(data, rng, field_index + 1)
-		if not boss.is_empty():
-			isl["boss"] = boss
-			isl["task"] = {}
-			isl["event"] = ""
-			isl["danger"] = false
-		choices.append(isl)
+	for isl in row:
+		if int(isl["lane"]) in prev.get("next", []) or row.size() == 1:
+			choices.append(isl)
 
 
 ## Выбор острова на карте и вход на него.
@@ -137,6 +200,8 @@ func choose_island(i: int) -> void:
 	if phase != "map" or i < 0 or i >= choices.size():
 		return
 	island = choices[i]
+	island["visited"] = true
+	pos_lane = int(island["lane"])
 	choices = []
 	field_index += 1
 	field = island["field"]
@@ -466,6 +531,7 @@ func leave_market() -> void:
 		return
 	sprint += 1
 	layer = 0
+	pos_lane = -1
 	market = {}
 	phase = "map"
 	_make_choices()

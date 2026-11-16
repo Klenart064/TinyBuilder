@@ -190,8 +190,18 @@ func _play(seed: int, smart: bool = true):
 func test_run_flow() -> void:
 	var run := LandRun.new()
 	run.start(data, 7)
-	_check(run.phase == "map" and run.choices.size() == 2, "забег начинается с карты: выбор из 2 островов")
+	_check(run.phase == "map" and run.choices.size() == int(data.run["lanes"]), "забег начинается с карты: на первом шаге доступны все дорожки")
+	var total := 0
+	var linked := true
+	for sp in run.run_map:
+		for li in sp.size():
+			total += sp[li].size()
+			for isl in sp[li]:
+				if li < sp.size() - 1 and isl["next"].is_empty():
+					linked = false
+	_check(run.run_map.size() == 4 and linked, "вся карта забега сгенерирована сразу, у каждого острова есть путь дальше (%d островов)" % total)
 	run.choose_island(1)
+	var from: Dictionary = run.island
 	_check(run.phase == "island" and run.hand.size() == 4 and run.turn == 1 and run.field_index == 1, "остров выбран: рука 4, ход 1")
 	var ev := run.event_type
 	LandBot.play_turn(run)
@@ -202,7 +212,11 @@ func test_run_flow() -> void:
 	var stock_before: Dictionary = run.stock.duplicate()
 	var prod: Dictionary = run.score()["total"]
 	r = run.end_turn()
-	_check(r["field_done"] and run.phase == "map" and run.choices.size() == 2, "после 3 ходов — снова карта")
+	var lanes_ok := run.choices.size() >= 1
+	for isl in run.choices:
+		if not (int(isl["lane"]) in from["next"]):
+			lanes_ok = false
+	_check(r["field_done"] and run.phase == "map" and lanes_ok, "после 3 ходов — карта, доступны только связанные острова")
 	var ok := true
 	for res in prod:
 		if int(run.stock[res]) < int(stock_before[res]) + int(prod[res]):
