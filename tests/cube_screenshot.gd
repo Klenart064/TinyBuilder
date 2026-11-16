@@ -64,6 +64,16 @@ func _run() -> void:
 	main._full_refresh()
 	await _frames(8)
 	_save("cube_build.png")
+	main._turn_camera(1)
+	await _seconds(0.6)
+	main.toast.visible = false
+	main.selected = 0
+	main.hover = r.field.free_cells()[0] if not r.field.free_cells().is_empty() else -1
+	main._full_refresh()
+	await _frames(6)
+	_save("cube_cam_q.png")
+	main._turn_camera(-1)
+	await _seconds(0.6)
 	# Анимация поворота: середина
 	LandBot.play_turn(r, true)
 	r.end_turn()

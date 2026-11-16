@@ -29,6 +29,9 @@ const CAMERA_BASE := Vector3(7.3, 7.1, 7.3)
 
 ## Куб: на какую грань сейчас наведена мышь (для выбора поворота)
 var roll_hover := -1
+## Куб: поворот камеры вокруг куба (Q/E), радианы
+var cam_yaw := 0.0
+var _cam_turning := false
 
 var data
 var run
@@ -157,7 +160,7 @@ func _cube_off() -> Vector3:
 ## Видна ли клетка с камеры (верх, +X, +Z).
 func _cell_visible(i: int) -> bool:
 	var n := cell_up(i)
-	return n.y > 0.5 or n.x > 0.5 or n.z > 0.5
+	return n.y > 0.5 or n.dot(Vector3(1, 0, 1).rotated(Vector3.UP, cam_yaw)) > 0.5
 
 
 ## Поворот, который кладёт «верх» модели на нормаль n.
@@ -1319,6 +1322,18 @@ func _refresh_side() -> void:
 		var cc := CenterContainer.new()
 		cc.add_child(_cube_net(run.field, run.cube_roll and run.phase == "island", run.score()))
 		nb.add_child(cc)
+		var cam := HBoxContainer.new()
+		cam.alignment = BoxContainer.ALIGNMENT_CENTER
+		for k in [[1, "<  Q"], [-1, "E  >"]]:
+			var b := Button.new()
+			b.text = k[1]
+			b.focus_mode = Control.FOCUS_NONE
+			b.custom_minimum_size = Vector2(70, 32)
+			b.pressed.connect(_turn_camera.bind(k[0]))
+			cam.add_child(b)
+			if k[0] == 1:
+				cam.add_child(_label("камера", 14, Color("#a9b4c0")))
+		nb.add_child(cam)
 
 	var deck_btn := Button.new()
 	deck_btn.text = "Колода: %d карт (D)" % run.all_cards().size()
@@ -1348,7 +1363,7 @@ func _refresh_side() -> void:
 	t += "[color=#ffb347]Каменный куб[/color]: 6 граней с печатями. Каждый ход катите куб на соседнюю грань и стройте на верхней. В конце хода печать верхней грани проверяют: хватает — снята, нет — −1%s за каждую недостающую единицу. Здания на краю — соседи зданий соседней грани.\n" % _heart_img(14)
 	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
-	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран, F2 сразу к кубу[/color]"
+	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, D колода, F11 полный экран, F2 сразу к кубу, Q/E вращать камеру у куба[/color]"
 	rb.add_child(_rich_line(t, 13))
 
 
@@ -1584,6 +1599,9 @@ func _input(event: InputEvent) -> void:
 		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
 			var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+			get_viewport().set_input_as_handled()
+		elif (event.keycode == KEY_Q or event.keycode == KEY_E) and _is_cube() and not overlay.visible:
+			_turn_camera(1 if event.keycode == KEY_Q else -1)
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_F2 and not busy:
 			_skip_to_cube()
@@ -2381,11 +2399,13 @@ func _update_camera() -> void:
 	var look := Vector3(0.3, 0, 0.3)
 	var shift := Vector3(0, -0.9, 0)
 	camera.size = 7.8
+	var off := Vector3(7, 8, 7)
 	if _is_cube():
-		look = Vector3(0.2, -1.45, 0.2)
+		look = Vector3(0, -1.45, 0)
 		shift = Vector3(0, -1.6, 0)
 		camera.size = 10.4
-	camera.position = look + Vector3(7, 8, 7)
+		off = off.rotated(Vector3.UP, cam_yaw)
+	camera.position = look + off
 	camera.look_at(look, Vector3.UP)
 	camera.position += shift
 
@@ -2530,83 +2550,157 @@ func _cube_info(sc: Dictionary) -> void:
 	bb.add_child(_rich_line("[color=#a9b4c0]Ходов после этого: %d. Потом оставшиеся печати бьют разом.[/color]" % left, 13))
 
 
-## Схема куба ромбом, как его видно на экране: в центре верх, вокруг 4 стороны, снизу — низ.
+## Схема-развёртка куба, повёрнутая как на экране: в центре верх, вокруг 4 стороны,
+## низ — за ближней к зрителю стороной. Клетки цветом зданий, на гранях — печати.
+## Клик по стороне — катить туда.
 func _cube_net(f, interactive: bool, sc: Dictionary = {}) -> Control:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 4)
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 4)
-	grid.add_theme_constant_override("v_separation", 4)
+	var view := Control.new()
+	view.custom_minimum_size = Vector2(250, 250)
+	view.mouse_filter = Control.MOUSE_FILTER_STOP if interactive else Control.MOUSE_FILTER_IGNORE
+	var yaw := cam_yaw if _is_cube() else 0.0
+	# Экранные оси на земле: вправо и «от зрителя»
+	var right := Vector3(1, 0, -1).normalized().rotated(Vector3.UP, yaw)
+	var away := Vector3(-1, 0, -1).normalized().rotated(Vector3.UP, yaw)
 	var sides: Dictionary = f.side_faces()
-	var at := {}
+	var near_dir := Vector3.ZERO
 	for face in sides:
-		var d: Vector3 = sides[face]
-		if d.x < -0.5:
-			at[0] = face
-		elif d.z < -0.5:
-			at[2] = face
-		elif d.z > 0.5:
-			at[6] = face
-		else:
-			at[8] = face
-	at[4] = f.top()
+		if near_dir == Vector3.ZERO or sides[face].dot(away) < near_dir.dot(away):
+			near_dir = sides[face]
 	var opts: Array = run.roll_options() if interactive else []
-	for k in 9:
-		if not at.has(k):
-			var sp := Control.new()
-			sp.custom_minimum_size = Vector2(84, 52)
-			grid.add_child(sp)
-			continue
-		grid.add_child(_net_face(f, at[k], k == 4, at[k] in opts, sc))
-	box.add_child(grid)
-	var bottom := -1
+	# Развёртка: клетка → точка на плоскости (x, z) в клетках
+	var cells := {}
+	var centers := {}
 	for face in 6:
-		if f.world_normal(face).y < -0.5:
-			bottom = face
-	var bl := HBoxContainer.new()
-	bl.alignment = BoxContainer.ALIGNMENT_CENTER
-	bl.add_child(_label("Снизу:", 13, Color("#a9b4c0")))
-	bl.add_child(_net_face(f, bottom, false, false, sc))
-	box.add_child(bl)
-	return box
+		var n: Vector3 = f.world_normal(face)
+		var acc := Vector3.ZERO
+		for k in 9:
+			var i: int = face * 9 + k
+			var w: Vector3 = f.orient * CubeField.center(i)
+			var u := Vector3(w.x, 0, w.z)
+			if n.y < -0.5:
+				u = u - near_dir * 2.0 * near_dir.dot(u) + near_dir * 6.0
+			elif absf(n.y) < 0.5:
+				u = u + Vector3(n.x, 0, n.z) * (1.5 - w.y)
+			cells[i] = u
+			acc += u
+		centers[face] = acc / 9.0
+	var to2 := func(u: Vector3) -> Vector2:
+		return Vector2(u.dot(right), -u.dot(away))
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for i in cells:
+		for c in [Vector3(-0.5, 0, -0.5), Vector3(0.5, 0, 0.5), Vector3(-0.5, 0, 0.5), Vector3(0.5, 0, -0.5)]:
+			var p: Vector2 = to2.call(cells[i] + c)
+			lo = Vector2(minf(lo.x, p.x), minf(lo.y, p.y))
+			hi = Vector2(maxf(hi.x, p.x), maxf(hi.y, p.y))
+	var scale := minf(244.0 / (hi.x - lo.x), 244.0 / (hi.y - lo.y))
+	var origin := Vector2(125, 125) - (lo + hi) / 2.0 * scale
+	var px := func(u: Vector3) -> Vector2:
+		return origin + to2.call(u) * scale
+	var font: Font = ThemeDB.fallback_font
+	view.draw.connect(func():
+		for i in cells:
+			var face: int = i / 9
+			var id: String = f.content[i]
+			var col := Color("#5d7a3a")
+			if f.broken[face]:
+				col = Color("#3d6b45")
+			if id == "rock":
+				col = Color("#8d8d93")
+			elif id == "mountain":
+				col = Color("#5e5a57")
+			elif id != "" and data.is_building(id):
+				col = Color(_res_color(data.color_of(id)))
+			if face == roll_hover and not f.broken[face]:
+				col = col.lerp(SEAL_COLOR, 0.35)
+			var pts := PackedVector2Array()
+			for c in [Vector3(-0.44, 0, -0.44), Vector3(0.44, 0, -0.44), Vector3(0.44, 0, 0.44), Vector3(-0.44, 0, 0.44)]:
+				pts.append(px.call(cells[i] + c))
+			view.draw_colored_polygon(pts, col)
+		for face in 6:
+			var c: Vector3 = centers[face]
+			var pts := PackedVector2Array()
+			for k in [Vector3(-1.5, 0, -1.5), Vector3(1.5, 0, -1.5), Vector3(1.5, 0, 1.5), Vector3(-1.5, 0, 1.5), Vector3(-1.5, 0, -1.5)]:
+				pts.append(px.call(c + k))
+			var bc := Color("#4a5566")
+			var w := 1.5
+			if face == f.top():
+				bc = Color.WHITE
+				w = 3.0
+			elif face in opts:
+				bc = SEAL_COLOR
+				w = 3.0 if face == roll_hover else 2.0
+			view.draw_polyline(pts, bc, w)
+			# Печать в центре грани
+			var lines := []
+			if f.broken[face]:
+				lines.append(["", "снята"])
+			else:
+				var have: Dictionary = {}
+				if not sc.is_empty():
+					have = run.cube_have(sc) if face == f.top() and run.is_cube() and run.phase == "island" else sc["faces"][face]
+				for r in f.seals[face]:
+					var t := str(int(f.seals[face][r]))
+					if not sc.is_empty():
+						t = "%d/%d" % [mini(int(have.get(r, 0)), int(f.seals[face][r])), int(f.seals[face][r])]
+					lines.append([r, t])
+			var center: Vector2 = px.call(c)
+			var y0 := center.y - (lines.size() - 1) * 9.0
+			for k in lines.size():
+				var r: String = lines[k][0]
+				var t: String = lines[k][1]
+				var fs := 15
+				var tw := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+				var total := tw + (16.0 if r != "" else 0.0)
+				var x := center.x - total / 2.0
+				var y := y0 + k * 18.0
+				view.draw_rect(Rect2(x - 3, y - 9, total + 6, 18), Color(0, 0, 0, 0.55))
+				var tc := Color("#6fcf97") if r == "" else Color.WHITE
+				view.draw_string_outline(font, Vector2(x, y + 5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color.BLACK)
+				view.draw_string(font, Vector2(x, y + 5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, tc)
+				if r != "":
+					view.draw_texture_rect(_icon(r), Rect2(x + tw + 2, y - 7, 14, 14), false)
+		)
+	if interactive:
+		var face_at := func(pos: Vector2) -> int:
+			var q: Vector2 = (pos - origin) / scale
+			var u := right * q.x - away * q.y
+			for face in opts:
+				var c: Vector3 = centers[face]
+				if absf(u.x - c.x) <= 1.5 and absf(u.z - c.z) <= 1.5:
+					return face
+			return -1
+		view.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseMotion:
+				var fh: int = face_at.call(ev.position)
+				if fh != roll_hover:
+					roll_hover = fh
+					view.queue_redraw()
+					_update_hover()
+					_refresh_hint()
+			elif ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+				var fc: int = face_at.call(ev.position)
+				if fc >= 0:
+					_on_roll(fc))
+	return view
 
 
-func _net_face(f, face: int, is_top: bool, clickable: bool, sc: Dictionary) -> Control:
-	var st := StyleBoxFlat.new()
-	st.set_corner_radius_all(6)
-	st.set_content_margin_all(4)
-	st.bg_color = Color("#2b3442") if not f.broken[face] else Color("#24402c")
-	st.set_border_width_all(2)
-	st.border_color = Color("#ffffff") if is_top else (SEAL_COLOR if clickable else Color("#4a5566"))
-	var text := _seal_text_of(f, face, 16, sc if not sc.is_empty() else {})
-	if is_top:
-		text = "[b]верх[/b] " + text
-	var lbl := _rich_line("[center]%s[/center]" % text, 13)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	lbl.custom_minimum_size = Vector2(84, 0)
-	if clickable:
-		var btn := Button.new()
-		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(84, 52)
-		for state in ["normal", "hover", "pressed"]:
-			var s2: StyleBoxFlat = st.duplicate()
-			if state == "hover":
-				s2.bg_color = Color("#4a3a20")
-			btn.add_theme_stylebox_override(state, s2)
-		lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
-		btn.add_child(lbl)
-		btn.pressed.connect(_on_roll.bind(face))
-		btn.mouse_entered.connect(func():
-			roll_hover = face
-			_update_hover()
-			_refresh_hint())
-		return btn
-	var p := PanelContainer.new()
-	p.custom_minimum_size = Vector2(84, 52)
-	p.add_theme_stylebox_override("panel", st)
-	p.add_child(lbl)
-	return p
+## Камера вокруг куба на 90° (Q — влево, E — вправо).
+func _turn_camera(dir: int) -> void:
+	if _cam_turning:
+		return
+	_cam_turning = true
+	for c in hover_root.get_children():
+		c.queue_free()
+	var from := cam_yaw
+	var tw := create_tween()
+	tw.tween_method(func(a: float):
+		cam_yaw = a
+		_update_camera(), from, from + dir * PI / 2.0, 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await tw.finished
+	cam_yaw = wrapf(cam_yaw, -PI, PI)
+	_cam_turning = false
+	_full_refresh()
 
 
 ## Куб катится: поворот на 90° вокруг ребра, потом поле перестраивается.
