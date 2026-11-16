@@ -210,7 +210,10 @@ func choose_island(i: int) -> void:
 	field = island["field"]
 	event_type = island["event"]
 	task = island["task"]
-	deck.discard(hand)
+	# Колода заново на каждом острове: все карты перемешиваются в добор
+	deck.draw_pile = all_cards()
+	deck.discard_pile = []
+	deck._shuffle(deck.draw_pile)
 	hand = deck.draw(int(data.run["hand_size"]))
 	echo_gain = data.zero_res()
 	turn = 1

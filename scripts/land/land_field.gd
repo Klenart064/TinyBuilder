@@ -185,16 +185,55 @@ func echo(data, cell: int, level: int) -> Array:
 	return out
 
 
-## Уровень мастерской на острове: сколько рядом добычи своего цвета (0–4). Только для вида.
-func workshop_level(data, cell: int) -> int:
+## Уровень здания на острове (0–4) — только для вида, доход не меняет. Правило по типу:
+## добыча — мастерские своего цвета рядом + гора/озеро её цвета рядом + плодородная земля под ней;
+## мастерская — добыча своего цвета рядом; жильё — здания рядом; Рынок — разные цвета рядом; Таверна — жильё рядом.
+func level(data, cell: int) -> int:
 	var id: String = content[cell]
-	if data.role(id) != "workshop":
+	if not data.is_building(id):
 		return 0
+	var role: String = data.role(id)
+	var col: String = data.color_of(id)
+	var bid: String = data.base_id(id)
 	var n := 0
-	for j in neighbors(cell):
-		if exists[j] and data.role(content[j]) == "base" and data.color_of(content[j]) == data.color_of(id):
+	var colors := {}
+	if role == "base" and terrain[cell] != "":
+		var td: Dictionary = data.terrain[terrain[cell]]
+		if int(td.get("bonus", 0)) > 0 and (td["color"] == col or td["color"] == "any"):
 			n += 1
+	for j in neighbors(cell):
+		if not exists[j]:
+			continue
+		var nid: String = content[j]
+		if role == "base" and data.kind(nid) == "obstacle":
+			var bonus: Dictionary = data.objects[nid].get("bonus_to_neighbors", {})
+			var brole: String = data.objects[nid].get("bonus_role", "")
+			if bonus.has(col) and (brole == "" or brole == role):
+				n += 1
+		if not data.is_building(nid):
+			continue
+		var nrole: String = data.role(nid)
+		match role:
+			"base":
+				if nrole == "workshop" and data.color_of(nid) == col:
+					n += 1
+			"workshop":
+				if nrole == "base" and data.color_of(nid) == col:
+					n += 1
+			"housing":
+				n += 1
+			_:
+				if bid == "market" and data.is_producer(nid):
+					colors[data.color_of(nid)] = true
+				elif bid == "tavern" and nrole == "housing":
+					n += 1
+	if bid == "market":
+		n = colors.size()
 	return mini(n, 4)
+
+
+func workshop_level(data, cell: int) -> int:
+	return level(data, cell) if data.role(content[cell]) == "workshop" else 0
 
 
 static func cascade_total(steps: Array) -> Dictionary:
@@ -257,7 +296,8 @@ func score(data) -> Dictionary:
 			var nid: String = content[j]
 			if data.kind(nid) == "obstacle" and data.is_producer(id):
 				var bonus: Dictionary = data.objects[nid].get("bonus_to_neighbors", {})
-				if bonus.has(col):
+				var brole: String = data.objects[nid].get("bonus_role", "")
+				if bonus.has(col) and (brole == "" or brole == role):
 					_add(cells[i], col, int(bonus[col]), data.obj_name(nid))
 			if not data.is_building(nid) or j in disabled:
 				continue

@@ -15,10 +15,11 @@
     "barracks": {"name": "Казарма", "kind": "building", "role": "workshop", "color": "force", "tint": "#a33b3b", "height": 0.95, "self": 1, "per_base": 2, "upgrade": {"self": 2, "per_base": 3}},
     "house": {"name": "Домик", "kind": "building", "role": "housing", "color": "wild", "wild": 1, "tint": "#d9a066", "height": 0.85, "upgrade": {"wild": 2}},
     "manor": {"name": "Усадьба", "kind": "building", "role": "housing", "color": "wild", "wild": 2, "tint": "#d9a066", "height": 1.0, "upgrade": {"wild": 3}},
-    "market": {"name": "Рынок", "kind": "building", "role": "city", "color": "city", "tint": "#b07ad9", "height": 0.8, "per_color": 1, "upgrade": {"per_color": 2}},
+    "market": {"name": "Рынок", "kind": "building", "role": "city", "color": "city", "tint": "#b07ad9", "height": 0.8, "per_color": 2, "upgrade": {"per_color": 3}},
     "tavern": {"name": "Таверна", "kind": "building", "role": "city", "color": "city", "tint": "#b07ad9", "height": 0.9, "per_housing": 1, "upgrade": {"per_housing": 2}},
     "rock": {"name": "Камень", "kind": "obstacle", "shape": "rock", "tint": "#6f6f6f", "height": 0.5},
     "lake": {"name": "Озеро", "kind": "obstacle", "shape": "lake", "tint": "#3f86c7", "height": 0.05, "bonus_to_neighbors": {"food": 1}},
+    "mountain": {"name": "Гора", "kind": "obstacle", "shape": "mountain", "tint": "#7d7a78", "height": 0.9, "bonus_to_neighbors": {"gold": 2}, "bonus_role": "base", "_help": "Гора: соседние Шахты +2 золота"},
     "lair": {"name": "Логово", "kind": "threat", "shape": "lair", "tint": "#3a2a3f", "height": 0.9}
   },
   "_terrain_help": "Местность под клеткой. bonus — сколько добавляется зданию добычи или мастерской своего цвета (color) или любого цвета (color: any).",

@@ -332,7 +332,7 @@ func _rebuild_board() -> void:
 		var id: String = f.content[i]
 		if id != "":
 			var node := _make_object(id, 1.0, f.facing[i])
-			Models.add_level(node, id, f.workshop_level(data, i))
+			Models.add_level(node, id, f.level(data, i))
 			node.position = p
 			board_root.add_child(node)
 			objs[i] = node
@@ -358,7 +358,7 @@ func _rebuild_board() -> void:
 		var holder := Node3D.new()
 		holder.position = cell_pos(i) + Vector3(0, float(data.objects[f.content[i]].get("height", 0.9)) + 0.3, 0)
 		board_root.add_child(holder)
-		var lv: int = f.workshop_level(data, i)
+		var lv: int = f.level(data, i)
 		if lv > 0:
 			var lb := _text_badge("ур. %d" % lv, 26, Color("#f2c94c"))
 			lb.position = Vector3(0, 0.32, 0)
@@ -1239,7 +1239,8 @@ func _refresh_side() -> void:
 	var force := _img("force", 16)
 	var t := ""
 	t += "[color=#5fe3ff][b]Эхо[/b][/color] — навык карты с рынка: при постройке здания вокруг срабатывают ещё раз, доход сразу в казну. I — соседи, II — волна на 2 шага по связкам, III — вся связанная сеть.\n"
-	t += "[color=#f2c94c]Уровень мастерской[/color] = сколько рядом добычи её цвета (пристройки на модели).\n"
+	t += "[color=#f2c94c]Уровни зданий[/color] (пристройки на модели): добыча — мастерские своего цвета, гора/озеро, плодородная земля; мастерская — добыча своего цвета; жильё — здания рядом; Рынок — цвета рядом; Таверна — жильё рядом.\n"
+	t += "[b]Гора[/b]: Шахтам рядом +2%s. [b]Озеро[/b]: Полю и Мельнице рядом +1%s.\n" % [_img("gold", 14), _img("food", 14)]
 	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
 	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
 	t += "[color=#eb5757]Босс[/color]: на его острове нужно произвести N всего, иначе −1%s за единицу.\n" % _heart_img(14)
@@ -1316,6 +1317,15 @@ func _card_rules(id: String, small: bool = false) -> String:
 	if lv == 0:
 		return base_rules
 	return base_rules + "\n[color=#5fe3ff][b]Эхо %s[/b][/color]" % ["I", "II", "III"][lv - 1]
+
+
+## Чем здание набирает уровень (для подсказки и правил).
+func _level_rule(id: String) -> String:
+	match data.role(id):
+		"base": return "мастерские своего цвета, гора/озеро рядом, плодородная земля"
+		"workshop": return "добыча своего цвета рядом"
+		"housing": return "здания рядом"
+	return "разные цвета рядом" if data.base_id(id) == "market" else "жильё рядом"
 
 
 func _echo_desc(lv: int) -> String:
@@ -1439,9 +1449,9 @@ func _refresh_hint() -> void:
 			s += "[color=#c0c0c0]выключено Логовом[/color]"
 		else:
 			s += _fmt(cellinfo["yield"], true)
-			var lv: int = f.workshop_level(data, hover)
+			var lv: int = f.level(data, hover)
 			if lv > 0:
-				s += "   [color=#f2c94c]уровень %d (добычи рядом: %d)[/color]" % [lv, lv]
+				s += "   [color=#f2c94c]уровень %d — %s[/color]" % [lv, _level_rule(f.content[hover])]
 	else:
 		s = "[color=#a9b4c0]Построек в этом ходу: %d[/color]" % run.plays_left
 	hint_text.text = "[center]%s[/center]" % s
@@ -1879,6 +1889,10 @@ func _mini_field(f, cell: int) -> GridContainer:
 			var id: String = f.content[i]
 			if id == "rock":
 				st.bg_color = Color("#8d8d93")
+			elif id == "mountain":
+				st.bg_color = Color("#5e5a57")
+				st.border_color = Color("#f2c94c")
+				st.set_border_width_all(2)
 			elif id == "lake":
 				st.bg_color = Color("#4a8fc8")
 			elif id != "" and data.is_building(id):

@@ -38,6 +38,7 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 		"manor": m._manor()
 		"market": m._market()
 		"tavern": m._tavern()
+		"mountain": m._mountain()
 		_: return null
 	if id.ends_with("+"):
 		m._upgrade_flag()
@@ -81,11 +82,62 @@ static func add_level(root_: Node3D, id: String, level: int, alpha_: float = 1.0
 				m.box(Vector3(0.18, 0.14, 0.18), c + Vector3(0, 0.07, 0), WOOD)
 				m.box(Vector3(0.12, 0.1, 0.12), c + Vector3(0.02, 0.19, 0.02), WOOD_DARK)
 				m.box(Vector3(0.12, 0.06, 0.07), c + Vector3(0, 0.27, 0), GOLD, Vector3.ZERO, true)
+			"field":
+				# Стог и тележка
+				m.cyl(0.0, 0.12, 0.22, c + Vector3(0, 0.11, 0), FOOD, 8)
+				m.box(Vector3(0.16, 0.06, 0.1), c + Vector3(0.1, 0.06, -0.1), WOOD)
+			"mine":
+				# Вагонетка с рудой
+				m.box(Vector3(0.18, 0.08, 0.12), c + Vector3(0, 0.08, 0), STONE_DARK)
+				m.ball(0.06, c + Vector3(-0.03, 0.15, 0), GOLD, true)
+				m.ball(0.05, c + Vector3(0.05, 0.14, 0.02), GOLD, true)
+			"tower":
+				# Кусок стены с зубцом
+				m.box(Vector3(0.24, 0.18, 0.08), c + Vector3(0, 0.09, 0), STONE)
+				m.box(Vector3(0.07, 0.07, 0.08), c + Vector3(-0.08, 0.215, 0), STONE_DARK)
+				m.box(Vector3(0.07, 0.07, 0.08), c + Vector3(0.08, 0.215, 0), STONE_DARK)
+			"house", "manor":
+				# Грядка, колодец, забор, дерево — по очереди
+				match k:
+					0:
+						m.box(Vector3(0.22, 0.05, 0.14), c + Vector3(0, 0.025, 0), Color("#6b4a2e"))
+						for q in 3:
+							m.ball(0.035, c + Vector3(-0.07 + q * 0.07, 0.07, 0), Color("#7cc45a"))
+					1:
+						m.cyl(0.07, 0.07, 0.1, c + Vector3(0, 0.05, 0), STONE, 10)
+						m.roof(0.16, 0.07, 0.12, c + Vector3(0, 0.2, 0), ROOF)
+					2:
+						for q in 3:
+							m.box(Vector3(0.025, 0.1, 0.025), c + Vector3(-0.08 + q * 0.08, 0.05, 0), WOOD)
+						m.box(Vector3(0.2, 0.02, 0.02), c + Vector3(0, 0.08, 0), WOOD)
+					_:
+						m.cyl(0.02, 0.025, 0.14, c + Vector3(0, 0.07, 0), WOOD_DARK, 6)
+						m.ball(0.09, c + Vector3(0, 0.2, 0), Color("#5d9a3e"))
+			"market":
+				# Лоток с навесом
+				m.box(Vector3(0.18, 0.08, 0.12), c + Vector3(0, 0.04, 0), WOOD)
+				m.box(Vector3(0.22, 0.02, 0.16), c + Vector3(0, 0.2, 0), [FOOD, GOLD, FORCE][k % 3])
+				m.box(Vector3(0.02, 0.12, 0.02), c + Vector3(-0.09, 0.14, 0.06), WOOD_DARK)
+				m.box(Vector3(0.02, 0.12, 0.02), c + Vector3(0.09, 0.14, 0.06), WOOD_DARK)
+			"tavern":
+				# Бочка и стол
+				m.cyl(0.06, 0.06, 0.14, c + Vector3(-0.06, 0.07, 0), WOOD, 10)
+				m.box(Vector3(0.12, 0.02, 0.1), c + Vector3(0.08, 0.1, 0), WOOD_DARK)
+				m.box(Vector3(0.02, 0.1, 0.02), c + Vector3(0.08, 0.05, 0), WOOD_DARK)
 			_:
 				# Шатёр со знаменем
 				m.cyl(0.0, 0.16, 0.26, c + Vector3(0, 0.13, 0), Color("#d8cfc0"), 6)
 				m.box(Vector3(0.025, 0.42, 0.025), c + Vector3(0.12, 0.21, 0), WOOD_DARK)
 				m.box(Vector3(0.14, 0.09, 0.015), c + Vector3(0.19, 0.37, 0), FORCE)
+
+
+## Гора: две вершины со снегом и золотой жилой (Шахтам рядом +2).
+func _mountain() -> void:
+	cyl(0.0, 0.4, 0.85, Vector3(0.05, 0.425, 0.05), Color("#7d7a78"), 7)
+	cyl(0.0, 0.12, 0.25, Vector3(0.05, 0.73, 0.05), Color("#f2f2f2"), 7)
+	cyl(0.0, 0.26, 0.55, Vector3(-0.25, 0.275, 0.22), Color("#6e6b69"), 6)
+	cyl(0.0, 0.08, 0.15, Vector3(-0.25, 0.48, 0.22), Color("#f2f2f2"), 6)
+	box(Vector3(0.05, 0.22, 0.03), Vector3(0.18, 0.25, 0.33), GOLD, Vector3(0, 0, 25), true)
 
 
 ## Улучшенная карта: золотой флажок на углу клетки.

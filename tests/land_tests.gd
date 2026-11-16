@@ -74,7 +74,7 @@ func test_house_and_terrain() -> void:
 	m.content[4] = "mine"
 	m.content[9] = "mill"
 	var ms: Dictionary = m.score(data)
-	_check(ms["total"]["food"] == 2 + 1 + 1 and ms["total"]["gold"] == 2 + 1, "Рынок: +1 за каждый цвет соседей (еда %d, золото %d)" % [ms["total"]["food"], ms["total"]["gold"]])
+	_check(ms["total"]["food"] == 2 + 1 + 2 and ms["total"]["gold"] == 2 + 2, "Рынок: +2 за каждый цвет соседей (еда %d, золото %d)" % [ms["total"]["food"], ms["total"]["gold"]])
 	var t := _square()
 	t.content[5] = "tavern"
 	t.content[1] = "house"
@@ -202,6 +202,7 @@ func test_run_flow() -> void:
 					linked = false
 	_check(run.run_map.size() == 4 and linked, "вся карта забега сгенерирована сразу, у каждого острова есть путь дальше (%d островов)" % total)
 	run.choose_island(1)
+	_check(run.deck.discard_pile.is_empty() and run.deck.draw_pile.size() + run.hand.size() == run.all_cards().size(), "на острове колода собрана заново и перемешана")
 	var from: Dictionary = run.island
 	_check(run.phase == "island" and run.hand.size() == 4 and run.turn == 1 and run.field_index == 1, "остров выбран: рука 4, ход 1")
 	var ev := run.event_type
@@ -217,7 +218,9 @@ func test_run_flow() -> void:
 	for isl in run.choices:
 		if not (int(isl["lane"]) in from["next"]):
 			lanes_ok = false
-	_check(r["field_done"] and run.phase == "map" and lanes_ok, "после 3 ходов — карта, доступны только связанные острова")
+	run.choose_island(0)
+	_check(run.deck.discard_pile.is_empty() and run.all_cards().size() == 20, "следующий остров снова с полной колодой")
+	_check(r["field_done"] and lanes_ok, "после 3 ходов — карта, доступны только связанные острова")
 	var ok := true
 	for res in prod:
 		if int(run.stock[res]) < int(stock_before[res]) + int(prod[res]):
@@ -362,6 +365,16 @@ func test_echo() -> void:
 	var c3 := g.echo(data, 5, 3).map(func(x): return x["cell"])
 	_check(9 in c3 and 0 in c3, "Эхо III: вся связанная сеть (%s)" % str(c3))
 	_check(g.workshop_level(data, 1) == 2 and g.workshop_level(data, 10) == 2, "уровень мастерской = добыча своего цвета рядом")
+	_check(g.level(data, 0) == 1 and g.level(data, 9) == 2, "уровень добычи = мастерские своего цвета рядом")
+	var h := _square()
+	h.content[4] = "mine"
+	h.content[5] = "mountain"
+	h.content[0] = "house"
+	h.content[1] = "field"
+	_check(int(h.score(data)["total"]["gold"]) == 4 and h.level(data, 4) == 1, "Гора: соседней Шахте +2 и уровень")
+	h.content[6] = "mill"
+	_check(int(h.score(data)["total"]["food"]) == 2 + 1, "Гора не даёт бонус Мельнице и Полю")
+	_check(h.level(data, 0) == 2, "уровень жилья = здания рядом")
 	# Рынок: выбор +1 или Эхо I, Эхо II только со 2-го рынка
 	run.phase = "market"
 	run.stock = {"food": 50, "gold": 50, "force": 50, "wild": 0}
