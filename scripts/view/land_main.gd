@@ -6,6 +6,7 @@ const LandData = preload("res://scripts/land/land_data.gd")
 const LandRun = preload("res://scripts/land/land_run.gd")
 const LandField = preload("res://scripts/land/land_field.gd")
 const LandEvents = preload("res://scripts/land/land_events.gd")
+const Models = preload("res://scripts/view/models.gd")
 
 const STEP := 1.15
 const TILE_COLOR := Color("#5d7a3a")
@@ -155,6 +156,9 @@ func _box_mesh(size: Vector3) -> BoxMesh:
 
 ## «Кубиковая» модель объекта по shape/tint/height из data/land/cards.json.
 func _make_object(id: String, alpha: float = 1.0, facing: int = -1) -> Node3D:
+	var model: Node3D = Models.build(id, alpha)
+	if model != null:
+		return model
 	var b: Dictionary = data.objects[id]
 	var root := Node3D.new()
 	var color := Color(b.get("tint", "#cccccc"))
@@ -345,7 +349,7 @@ func _rebuild_board() -> void:
 		if not f.exists[i] or not data.is_building(f.content[i]):
 			continue
 		var holder := Node3D.new()
-		holder.position = cell_pos(i) + Vector3(0, 1.15, 0)
+		holder.position = cell_pos(i) + Vector3(0, float(data.objects[f.content[i]].get("height", 0.9)) + 0.3, 0)
 		board_root.add_child(holder)
 		if i in sc["disabled"]:
 			holder.add_child(_text_badge("выкл", 30, Color("#c0c0c0")))
@@ -1168,7 +1172,7 @@ func _refresh_hand() -> void:
 func _card_button(i: int, id: String) -> Button:
 	var col: String = data.color_of(id)
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(196, 176)
+	btn.custom_minimum_size = Vector2(206, 196)
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.disabled = run.plays_left <= 0 or busy
 	var res_col := Color(_res_color(col))
@@ -1194,26 +1198,75 @@ func _card_button(i: int, id: String) -> Button:
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 10)
-	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_top", 16)
 	btn.add_child(margin)
 	var v := VBoxContainer.new()
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_theme_constant_override("separation", 4)
+	v.add_theme_constant_override("separation", 2)
 	margin.add_child(v)
-	var title := _label(data.obj_name(id), 24, Color.WHITE)
+	var pic := TextureRect.new()
+	pic.texture = _card_tex(id)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.custom_minimum_size = Vector2(0, 104)
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(pic)
+	var title := _label(data.obj_name(id), 20, Color.WHITE)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
+	var t := ""
 	if col == "grey":
-		v.add_child(_rich_line("[font_size=30][b]+1[/b][/font_size] %s%s%s" % [_img("food", 28), _img("gold", 28), _img("force", 28)], 18))
-		v.add_child(_rich_line("[color=#a9b4c0]каждому соседу[/color]", 17))
+		t = "[b]+1[/b]%s%s%s [color=#a9b4c0]соседям[/color]" % [_img("food", 20), _img("gold", 20), _img("force", 20)]
 	else:
-		v.add_child(_rich_line("[font_size=30][b]+1[/b][/font_size] %s" % _img(col, 34), 18))
 		var partners := []
 		for p in data.pair_partners(id):
 			partners.append(data.objects[p].get("with", data.obj_name(p)))
-		v.add_child(_rich_line("[color=#ffd866][b]+2[/b][/color]%s [b]%s[/b]" % [_img(col, 24), ", ".join(partners)], 18))
-		if col == "force":
-			v.add_child(_rich_line("[color=#c58cff]сносит Логово[/color]", 15))
+		t = "[b]+1[/b]%s  [color=#ffd866][b]+2[/b][/color]%s [b]%s[/b]" % [_img(col, 22), _img(col, 20), ", ".join(partners)]
+	var stats := _rich_line("[center]%s[/center]" % t, 15)
+	v.add_child(stats)
 	return btn
+
+## Картинка здания для карты: модель рендерится в отдельном мире (SubViewport).
+var _card_tex_cache: Dictionary = {}
+var _card_studio: Node
+
+func _card_tex(id: String) -> Texture2D:
+	if _card_tex_cache.has(id):
+		return _card_tex_cache[id]
+	if _card_studio == null:
+		_card_studio = Node.new()
+		add_child(_card_studio)
+	var vp := SubViewport.new()
+	vp.size = Vector2i(270, 180)
+	vp.transparent_bg = true
+	vp.own_world_3d = true
+	vp.msaa_3d = Viewport.MSAA_4X
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_card_studio.add_child(vp)
+	var env_node := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_CLEAR_COLOR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.85, 0.9, 1.0)
+	env.ambient_light_energy = 0.7
+	env_node.environment = env
+	vp.add_child(env_node)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-55, -30, 0)
+	sun.light_energy = 1.1
+	vp.add_child(sun)
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = 1.6
+	vp.add_child(cam)
+	cam.position = Vector3(4, 4.2, 4)
+	cam.look_at(Vector3(0, 0.5, 0), Vector3.UP)
+	var model := _make_object(id)
+	vp.add_child(model)
+	var tex := vp.get_texture()
+	_card_tex_cache[id] = tex
+	return tex
+
 
 func _refresh_hint() -> void:
 	var s := ""
