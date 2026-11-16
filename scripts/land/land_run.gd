@@ -174,8 +174,8 @@ func finish_early() -> Dictionary:
 	return {"land": {}, "field_done": true, "early": true, "result": _finish_field()}
 
 
-## Что перейдёт на следующий остров, если закончить сейчас: {res: n}
-func carry_preview(sc: Dictionary = {}) -> Dictionary:
+## Излишки сверх задания прямо сейчас: {res: n}
+func surplus(sc: Dictionary = {}) -> Dictionary:
 	if sc.is_empty():
 		sc = score()
 	var out: Dictionary = data.zero_res()
@@ -187,7 +187,30 @@ func carry_preview(sc: Dictionary = {}) -> Dictionary:
 	return out
 
 
-## Сколько поле закроет задание прямо сейчас: {res: {"have", "need", "carry", "prod"}}
+func wagon_capacity() -> int:
+	return int(data.run.get("wagon_capacity", 3))
+
+
+## Повозка: что из излишков поедет на следующий остров. Кладётся только то,
+## что нужно в задании следующего острова (сначала больший спрос), не больше вместимости.
+func wagon_load(sc: Dictionary = {}) -> Dictionary:
+	var sur := surplus(sc)
+	var need: Dictionary = next_field.get("task", {})
+	var order: Array = need.keys()
+	order.sort_custom(func(a, b): return int(need[a]) > int(need[b]))
+	var load: Dictionary = data.zero_res()
+	var room := wagon_capacity()
+	for r in order:
+		var k := mini(mini(int(sur.get(r, 0)), int(need[r])), room)
+		load[r] = k
+		room -= k
+	return load
+
+
+## Совместимость: то же, что wagon_load.
+func carry_preview(sc: Dictionary = {}) -> Dictionary:
+	return wagon_load(sc)
+
 func task_progress(sc: Dictionary = {}) -> Dictionary:
 	if sc.is_empty():
 		sc = score()
@@ -203,17 +226,16 @@ func _finish_field() -> Dictionary:
 	var sc: Dictionary = score()
 	var prod: Dictionary = sc["total"]
 	var missing := 0
-	var new_carry: Dictionary = data.zero_res()
+	var new_carry: Dictionary = wagon_load(sc)
 	for r in data.resources:
 		var p := int(prod.get(r, 0))
 		var need := int(task.get(r, 0))
 		var from_carry := mini(int(carry.get(r, 0)), need)
 		var still := need - from_carry
 		missing += maxi(0, still - p)
-		new_carry[r] = maxi(0, p - still)
 	var discontent := int(sc["discontent"])
 	var res := {"prod": prod, "task": task.duplicate(), "carry_in": carry.duplicate(), "carry_out": new_carry,
-		"missing": missing, "discontent": discontent, "lives_before": lives}
+		"missing": missing, "discontent": discontent, "lives_before": lives, "surplus": surplus(sc)}
 	lives -= missing + discontent
 	carry = new_carry
 

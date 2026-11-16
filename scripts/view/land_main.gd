@@ -1112,14 +1112,21 @@ func _refresh_info() -> void:
 	if all_ok:
 		tb.add_child(_rich_line("[color=#6fcf97]Выполнено! Можно забрать остров (Enter)[/color]", 14))
 
-	# Запас: что перейдёт на следующий остров, если закончить сейчас
-	var cp: Dictionary = run.carry_preview(sc)
+	# Повозка: что поедет на следующий остров, если закончить сейчас
+	var cp: Dictionary = run.wagon_load(sc)
+	var sur: Dictionary = run.surplus(sc)
+	var loaded := 0
+	var extra := 0
 	var cs := ""
 	for r in data.resources:
+		loaded += int(cp[r])
+		extra += int(sur[r]) - int(cp[r])
 		if int(cp[r]) > 0:
 			cs += "[b]+%d[/b]%s  " % [int(cp[r]), _img(r, 22)]
-	var kb := _section(info_box, "Перейдёт на след. остров", Color("#8ab4f8"), 17)
-	kb.get_parent().tooltip_text = "Лишнее сверх задания переходит на следующий остров (только на один) и засчитывается в его задание."
+	if extra > 0:
+		cs += "[color=#6b7683]лишнее %d сгорит[/color]" % extra
+	var kb := _section(info_box, "Повозка %d/%d" % [loaded, run.wagon_capacity()], Color("#8ab4f8"), 17)
+	kb.get_parent().tooltip_text = "Излишки едут на следующий остров только в повозке: то, что нужно в его задании, не больше вместимости. Остальное сгорает."
 	kb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 	kb.add_child(_rich_line(cs if cs != "" else "[color=#6b7683]пока ничего[/color]", 17))
 
@@ -1186,7 +1193,7 @@ func _refresh_side() -> void:
 	t += "Не хватило задания: −1%s за штуку.\n" % _heart_img(14)
 	t += "Озеро: +1%s соседям.\n" % food
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
-	t += "Излишки идут на следующее поле.\n"
+	t += "Повозка везёт излишки, нужные дальше (до %d).\n" % run.wagon_capacity()
 	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, F11 полный экран[/color]"
 	rb.add_child(_rich_line(t, 13))
 
@@ -1495,7 +1502,7 @@ func _show_field_result(res: Dictionary) -> void:
 		if int(co[r]) > 0:
 			any_carry = true
 	if any_carry:
-		s += "Излишки на следующее поле: %s\n" % _fmt(co)
+		s += "В повозке на следующий остров: %s\n" % _fmt(co)
 	if res.get("global_checked", false):
 		var g: Dictionary = res["global"]
 		if res["global_passed"]:

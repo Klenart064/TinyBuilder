@@ -42,6 +42,9 @@
     { "name": "Королевский налог", "fields": 4, "resource": "gold",  "need": 16, "penalty": 3 }
   ],
 
+  "_wagon_help": "Повозка: излишки переносятся на следующий остров только в ней. Кладётся то, что нужно в задании следующего острова, не больше вместимости. Остальное сгорает.",
+  "wagon_capacity": 3,
+
   "reward_choices": 3,
   "reward_pool": ["field", "mill", "mine", "smithy", "barracks", "tower", "house"],
   "rest_heal": 1

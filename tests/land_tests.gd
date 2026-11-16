@@ -24,6 +24,7 @@ func _initialize() -> void:
 	test_run_flow()
 	test_undo()
 	test_finish_early()
+	test_wagon()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -181,6 +182,27 @@ func test_finish_early() -> void:
 		run.carry[r] = 99
 	var r2: Dictionary = run.finish_early()
 	_check(r2.get("field_done", false) and r2["result"]["missing"] == 0, "задание выполнено — остров можно забрать досрочно")
+
+
+func test_wagon() -> void:
+	var run := LandRun.new()
+	run.start(data, 4)
+	run.next_field["task"] = {"food": 2, "gold": 5}
+	run.task = {"force": 1}
+	run.carry = data.zero_res()
+	var f = run.field
+	for i in f.N:
+		f.content[i] = ""
+	var free: Array = f.free_cells()
+	f.content[free[0]] = "field"
+	f.content[free[1]] = "mine"
+	f.content[free[2]] = "barracks"
+	f.content[free[3]] = "mine"
+	var load: Dictionary = run.wagon_load()
+	var total := 0
+	for r in load:
+		total += int(load[r])
+	_check(total <= 3 and int(load["force"]) == 0, "повозка: не больше 3 и только нужное дальше (%s)" % str(load))
 
 
 func test_undo() -> void:
