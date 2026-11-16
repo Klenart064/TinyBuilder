@@ -1,5 +1,6 @@
-## Забег живой земли: поля по 3 хода, рука 4 карты, до 2 построек за ход,
-## после каждого хода ходит земля. Жизни теряются от недовольства и невыполненных заданий.
+## Забег живой земли: острова по 3 хода, рука 4 карты, до 2 построек за ход,
+## после каждого хода ходит земля. Доход копится в казну на весь забег; плата острова,
+## боссы и финальная угроза берутся из казны. Жизни теряются от недовольства и нехватки.
 extends RefCounted
 
 const Deck = preload("res://scripts/core/deck.gd")
@@ -20,14 +21,10 @@ var task: Dictionary = {}
 var turn := 1
 var plays_left := 0
 var hand: Array = []
-## Излишки прошлого поля (живут одно поле).
-var carry: Dictionary = {}
+## Казна на весь забег.
+var stock: Dictionary = {}
 ## Следующее поле (видно заранее): {"field", "event", "task"}
 var next_field: Dictionary = {}
-
-var global_index := 0
-var global_progress := 0
-var global_start := 1
 
 var reward_options: Array = []
 var game_over := false
@@ -46,10 +43,9 @@ func start(data_, seed: int = -1) -> void:
 	deck.setup(data.starter_deck, rng)
 	lives = int(data.run["lives"])
 	field_index = 0
-	carry = data.zero_res()
-	global_index = 0
-	global_progress = 0
-	global_start = 1
+	stock = data.zero_res()
+	for r in data.run.get("start_treasury", {}):
+		stock[r] = int(data.run["start_treasury"][r])
 	game_over = false
 	victory = false
 	reward_options = []
@@ -75,13 +71,46 @@ func event_info() -> Dictionary:
 	return data.events.get(event_type, {})
 
 
-func global_threat() -> Dictionary:
-	var list: Array = data.run["global_threats"]
-	return list[global_index % list.size()]
+## Ближайшая угроза после плат острова: босс или финальная. {"name", "cost", "at_field", "final"}
+func next_boss() -> Dictionary:
+	for b in data.run.get("bosses", []):
+		if int(b["at_field"]) >= field_index:
+			var d: Dictionary = b.duplicate()
+			d["final"] = false
+			return d
+	var f: Dictionary = data.run.get("final_threat", {}).duplicate()
+	f["at_field"] = int(data.run["fields_to_win"])
+	f["final"] = true
+	return f
 
 
-func global_end_field() -> int:
-	return global_start + int(global_threat()["fields"]) - 1
+## Платёж из пула: свой цвет, нехватку закрывают джокеры. Пул меняется.
+## {"missing": n, "wild_used": n, "short": {res: n}}
+static func pay(pool: Dictionary, cost: Dictionary) -> Dictionary:
+	var out := {"missing": 0, "wild_used": 0, "short": {}}
+	for r in cost:
+		var c := int(cost[r])
+		var own := mini(int(pool.get(r, 0)), c)
+		pool[r] = int(pool.get(r, 0)) - own
+		var d := c - own
+		var w := mini(int(pool.get("wild", 0)), d)
+		pool["wild"] = int(pool.get("wild", 0)) - w
+		out["wild_used"] += w
+		d -= w
+		if d > 0:
+			out["short"][r] = d
+			out["missing"] += d
+	return out
+
+
+## Казна + доход острова сейчас.
+func projected(sc: Dictionary = {}) -> Dictionary:
+	if sc.is_empty():
+		sc = score()
+	var p := stock.duplicate()
+	for r in sc["total"]:
+		p[r] = int(p.get(r, 0)) + int(sc["total"][r])
+	return p
 
 
 func score() -> Dictionary:
@@ -157,16 +186,12 @@ func end_turn() -> Dictionary:
 	return out
 
 
-## Выполнено ли задание прямо сейчас (с учётом запаса).
+## Хватает ли казны с доходом острова на плату острова.
 func task_done(sc: Dictionary = {}) -> bool:
-	var prog := task_progress(sc)
-	for r in prog:
-		if prog[r]["have"] < prog[r]["need"]:
-			return false
-	return true
+	return pay(projected(sc), task)["missing"] == 0
 
 
-## Забрать остров досрочно: задание выполнено, оставшиеся ходы земли не наступают.
+## Забрать остров досрочно: плата острова уже есть, оставшиеся ходы земли не наступают.
 func finish_early() -> Dictionary:
 	if game_over or not task_done():
 		return {}
@@ -174,84 +199,45 @@ func finish_early() -> Dictionary:
 	return {"land": {}, "field_done": true, "early": true, "result": _finish_field()}
 
 
-## Излишки сверх задания прямо сейчас: {res: n}
-func surplus(sc: Dictionary = {}) -> Dictionary:
-	if sc.is_empty():
-		sc = score()
-	var out: Dictionary = data.zero_res()
-	for r in data.resources:
-		var p := int(sc["total"].get(r, 0))
-		var need := int(task.get(r, 0))
-		var still := need - mini(int(carry.get(r, 0)), need)
-		out[r] = maxi(0, p - still)
-	return out
-
-
-func wagon_capacity() -> int:
-	return int(data.run.get("wagon_capacity", 3))
-
-
-## Повозка: что из излишков поедет на следующий остров. Кладётся только то,
-## что нужно в задании следующего острова (сначала больший спрос), не больше вместимости.
-func wagon_load(sc: Dictionary = {}) -> Dictionary:
-	var sur := surplus(sc)
-	var need: Dictionary = next_field.get("task", {})
-	var order: Array = need.keys()
-	order.sort_custom(func(a, b): return int(need[a]) > int(need[b]))
-	var load: Dictionary = data.zero_res()
-	var room := wagon_capacity()
-	for r in order:
-		var k := mini(mini(int(sur.get(r, 0)), int(need[r])), room)
-		load[r] = k
-		room -= k
-	return load
-
-
-## Совместимость: то же, что wagon_load.
-func carry_preview(sc: Dictionary = {}) -> Dictionary:
-	return wagon_load(sc)
-
+## Прогресс платы острова: {res: {"have", "need"}}, have — свой цвет + выделенные джокеры.
 func task_progress(sc: Dictionary = {}) -> Dictionary:
-	if sc.is_empty():
-		sc = score()
+	var pool := projected(sc)
 	var out := {}
 	for r in task:
-		var prod := int(sc["total"].get(r, 0))
-		var c := int(carry.get(r, 0))
-		out[r] = {"have": prod + c, "need": int(task[r]), "carry": c, "prod": prod}
+		var need := int(task[r])
+		var own := mini(int(pool.get(r, 0)), need)
+		pool[r] = int(pool.get(r, 0)) - own
+		var w := mini(int(pool.get("wild", 0)), need - own)
+		pool["wild"] = int(pool.get("wild", 0)) - w
+		out[r] = {"have": own + w, "need": need, "wild": w}
 	return out
 
 
 func _finish_field() -> Dictionary:
 	var sc: Dictionary = score()
 	var prod: Dictionary = sc["total"]
-	var missing := 0
-	var new_carry: Dictionary = wagon_load(sc)
-	for r in data.resources:
-		var p := int(prod.get(r, 0))
-		var need := int(task.get(r, 0))
-		var from_carry := mini(int(carry.get(r, 0)), need)
-		var still := need - from_carry
-		missing += maxi(0, still - p)
+	var res := {"prod": prod, "task": task.duplicate(), "lives_before": lives, "stock_before": stock.duplicate()}
+	for r in prod:
+		stock[r] = int(stock.get(r, 0)) + int(prod[r])
+	var lpm := int(data.run.get("life_per_missing", 1))
+	var t: Dictionary = pay(stock, task)
+	res["missing"] = int(t["missing"])
+	var lost: int = int(t["missing"]) * lpm
 	var discontent := int(sc["discontent"])
-	var res := {"prod": prod, "task": task.duplicate(), "carry_in": carry.duplicate(), "carry_out": new_carry,
-		"missing": missing, "discontent": discontent, "lives_before": lives, "surplus": surplus(sc)}
-	lives -= missing + discontent
-	carry = new_carry
+	res["discontent"] = discontent
+	lost += discontent
+	var joy := int(sc.get("joy", 0))
+	res["joy"] = joy
 
-	# Глобальная угроза
-	var g: Dictionary = global_threat()
-	global_progress += int(prod.get(g["resource"], 0))
-	res["global"] = g
-	res["global_progress"] = global_progress
-	if field_index >= global_end_field():
-		res["global_checked"] = true
-		res["global_passed"] = global_progress >= int(g["need"])
-		if not res["global_passed"]:
-			lives -= int(g.get("penalty", 3))
-		global_index += 1
-		global_progress = 0
-		global_start = field_index + 1
+	# Босс или финальная угроза на этом острове
+	var b: Dictionary = next_boss()
+	if int(b.get("at_field", -1)) == field_index:
+		var bp: Dictionary = pay(stock, b.get("cost", {}))
+		res["boss"] = b
+		res["boss_missing"] = int(bp["missing"])
+		lost += int(bp["missing"]) * int(b.get("life_per_missing", lpm))
+	lives = mini(lives + joy, int(data.run["lives"])) - lost
+	res["stock_after"] = stock.duplicate()
 	res["lives_after"] = lives
 
 	if lives <= 0:

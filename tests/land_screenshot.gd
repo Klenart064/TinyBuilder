@@ -59,7 +59,7 @@ func _run() -> void:
 	f.terrain[13] = "swamp"
 	r.event_type = "swap"
 	r.intent = {"type": "swap", "cells": [8, 2], "target": -1}
-	r.hand = ["barracks", "tower", "smithy", "house"]
+	r.hand = ["field", "mill", "mine", "barracks"]
 	main.selected = 0
 	main.hover = 8
 	main._full_refresh()
@@ -69,15 +69,15 @@ func _run() -> void:
 	await _frames(5)
 	_save("land_rules.png")
 	main._toggle_rules()
-	r.hand = ["field", "mill", "mine", "barracks"]
-	r.carry = {"food": 2, "gold": 0, "force": 3}
+	r.hand = ["manor", "market", "tavern", "house"]
+	r.stock = {"food": 4, "gold": 7, "force": 2, "wild": 1}
 	main.selected = -1
 	main.hover = -1
 	main._full_refresh()
 	await _frames(8)
 	_save("land_cards2.png")
 	for res in r.task:
-		r.carry[res] = int(r.task[res])
+		r.stock[res] = int(r.task[res])
 	main._full_refresh()
 	await _frames(5)
 	_save("land_claim.png")

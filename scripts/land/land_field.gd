@@ -144,8 +144,8 @@ func disabled_cells(data) -> Array:
 
 
 ## Доход и недовольство поля.
-## {"total": {res: n}, "discontent": n, "cells": [{"yield": {}, "notes": []}],
-##  "links": [{"a", "b", "type": pair|house|conflict, "res"}], "disabled": [клетки]}
+## {"total": {res: n}, "discontent": n, "joy": n, "cells": [{"yield": {}, "notes": []}],
+##  "links": [{"a", "b", "type": pair|house|market|tavern|conflict, "res"}], "disabled": [клетки]}
 func score(data) -> Dictionary:
 	var rules: Dictionary = data.rules
 	var disabled := disabled_cells(data)
@@ -154,44 +154,52 @@ func score(data) -> Dictionary:
 		cells.append({"yield": {}, "notes": []})
 	var links := []
 	var discontent := 0
+	var joy := 0
 	for i in N:
 		if not exists[i]:
 			continue
 		var id: String = content[i]
 		if not data.is_building(id) or i in disabled:
 			continue
+		var role: String = data.role(id)
 		var col: String = data.color_of(id)
-		if col != "grey":
-			_add(cells[i], col, int(rules["self"]), "")
+		match role:
+			"base":
+				_add(cells[i], col, int(rules["base"]), "")
+			"workshop":
+				_add(cells[i], col, int(rules["workshop_self"]), "")
+			"housing":
+				_add(cells[i], "wild", int(data.objects[id].get("wild", 1)), "")
+		if data.is_producer(id):
 			var t: String = terrain[i]
 			if t != "":
 				var td: Dictionary = data.terrain[t]
 				if td["color"] == col or td["color"] == "any":
 					_add(cells[i], col, int(td["bonus"]), td["name"])
+		var market_colors := {}
 		for j in neighbors(i):
 			if not exists[j]:
 				continue
 			var nid: String = content[j]
-			if data.kind(nid) == "obstacle" and col != "grey":
+			if data.kind(nid) == "obstacle" and data.is_producer(id):
 				var bonus: Dictionary = data.objects[nid].get("bonus_to_neighbors", {})
 				if bonus.has(col):
 					_add(cells[i], col, int(bonus[col]), data.obj_name(nid))
 			if not data.is_building(nid) or j in disabled:
 				continue
+			var nrole: String = data.role(nid)
 			var ncol: String = data.color_of(nid)
-			if col == "grey":
-				if ncol != "grey":
-					_add(cells[i], ncol, int(rules["house"]), "Дом")
-					links.append({"a": i, "b": j, "type": "house", "res": ncol})
-			elif ncol == "grey" or j < i:
-				continue
-			elif ncol == col:
-				if nid != id:
-					var p := int(rules["pair"])
-					_add(cells[i], col, p / 2, "пара")
-					_add(cells[j], col, p - p / 2, "пара")
-					links.append({"a": i, "b": j, "type": "pair", "res": col})
-			else:
+			if role == "workshop" and nrole == "base" and ncol == col:
+				_add(cells[i], col, int(rules["workshop_per_base"]), data.obj_name(nid))
+				links.append({"a": i, "b": j, "type": "pair", "res": col})
+			elif id == "market" and data.is_producer(nid) and not market_colors.has(ncol):
+				market_colors[ncol] = true
+				_add(cells[i], ncol, int(rules["market_per_color"]), "рынок")
+				links.append({"a": i, "b": j, "type": "house", "res": ncol})
+			elif id == "tavern" and nrole == "housing":
+				joy += int(rules["tavern_per_housing"])
+				links.append({"a": i, "b": j, "type": "tavern", "res": ""})
+			if j > i and data.is_producer(id) and data.is_producer(nid) and ncol != col:
 				discontent += int(rules["conflict"])
 				links.append({"a": i, "b": j, "type": "conflict", "res": ""})
 	var total: Dictionary = data.zero_res()
@@ -200,7 +208,7 @@ func score(data) -> Dictionary:
 			total[r] = int(total.get(r, 0)) + int(cells[i]["yield"][r])
 	for r in total:
 		total[r] = maxi(0, int(total[r]))
-	return {"total": total, "discontent": discontent, "cells": cells, "links": links, "disabled": disabled}
+	return {"total": total, "discontent": discontent, "joy": joy, "cells": cells, "links": links, "disabled": disabled}
 
 
 static func _add(cell: Dictionary, res: String, v: int, note: String) -> void:

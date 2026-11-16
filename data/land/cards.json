@@ -1,29 +1,33 @@
 {
-  "_help": "Объекты живой земли. color — цвет зоны: food (🌾), gold (🪙), force (🛡) или grey (Дом). kind: building — карта игрока; obstacle — препятствие (камень, озеро); threat — здание-угроза земли. shape/tint/height — как выглядит кубик.",
+  "_help": "Объекты живой земли. kind: building — карта игрока; obstacle — препятствие; threat — логово земли. role здания: base (добыча), workshop (мастерская), housing (жильё), city (городское). color — цвет ресурса (food/gold/force), у жилья wild, у городских city. Числа правил — в run.json → rules.",
   "resources": {
     "food":  { "name": "Еда",    "short": "еды",    "color": "#8bc34a", "icon": "res://assets/icons/food.svg" },
     "gold":  { "name": "Золото", "short": "золота", "color": "#f2c94c", "icon": "res://assets/icons/gold.svg" },
-    "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757", "icon": "res://assets/icons/force.svg" }
+    "force": { "name": "Сила",   "short": "силы",   "color": "#eb5757", "icon": "res://assets/icons/force.svg" },
+    "wild":  { "name": "Джокер", "short": "джокеров", "color": "#c9bff5", "icon": "res://assets/icons/wild.svg", "wild": true }
   },
   "objects": {
-    "field":    { "name": "Поле", "with": "с Полем",     "kind": "building", "color": "food",  "shape": "flat",  "tint": "#e3cf57", "height": 0.35 },
-    "mill":     { "name": "Мельница", "with": "с Мельницей", "kind": "building", "color": "food",  "shape": "mill",  "tint": "#c8b8a0", "height": 1.25 },
-    "mine":     { "name": "Шахта", "with": "с Шахтой",    "kind": "building", "color": "gold",  "shape": "mine",  "tint": "#6b5640", "height": 0.55 },
-    "smithy":   { "name": "Кузница", "with": "с Кузницей",  "kind": "building", "color": "gold",  "shape": "box",   "tint": "#4a4a55", "height": 1.05 },
-    "barracks": { "name": "Казарма", "with": "с Казармой",  "kind": "building", "color": "force", "shape": "box",   "tint": "#a33b3b", "height": 0.95 },
-    "tower":    { "name": "Башня", "with": "с Башней",    "kind": "building", "color": "force", "shape": "tower", "tint": "#8c8c9c", "height": 1.55 },
-    "house":    { "name": "Дом", "with": "с Домом",      "kind": "building", "color": "grey",  "shape": "house", "tint": "#d9a066", "height": 0.85 },
+    "field":    { "name": "Поле", "acc": "Поле",     "kind": "building", "role": "base",     "color": "food",  "tint": "#e3cf57", "height": 0.35 },
+    "mine":     { "name": "Шахта", "acc": "Шахту",    "kind": "building", "role": "base",     "color": "gold",  "tint": "#6b5640", "height": 0.55 },
+    "tower":    { "name": "Башня", "acc": "Башню",    "kind": "building", "role": "base",     "color": "force", "tint": "#8c8c9c", "height": 1.55 },
+    "mill":     { "name": "Мельница", "kind": "building", "role": "workshop", "color": "food",  "tint": "#c8b8a0", "height": 1.25 },
+    "smithy":   { "name": "Кузница",  "kind": "building", "role": "workshop", "color": "gold",  "tint": "#4a4a55", "height": 1.05 },
+    "barracks": { "name": "Казарма",  "kind": "building", "role": "workshop", "color": "force", "tint": "#a33b3b", "height": 0.95 },
+    "house":    { "name": "Домик",    "kind": "building", "role": "housing",  "color": "wild",  "wild": 1, "tint": "#d9a066", "height": 0.85 },
+    "manor":    { "name": "Усадьба",  "kind": "building", "role": "housing",  "color": "wild",  "wild": 2, "tint": "#d9a066", "height": 1.0 },
+    "market":   { "name": "Рынок",    "kind": "building", "role": "city",     "color": "city",  "tint": "#b07ad9", "height": 0.8 },
+    "tavern":   { "name": "Таверна",  "kind": "building", "role": "city",     "color": "city",  "tint": "#b07ad9", "height": 0.9 },
 
     "rock":     { "name": "Камень",   "kind": "obstacle", "shape": "rock",  "tint": "#6f6f6f", "height": 0.5 },
     "lake":     { "name": "Озеро",    "kind": "obstacle", "shape": "lake",  "tint": "#3f86c7", "height": 0.05, "bonus_to_neighbors": { "food": 1 } },
     "lair":     { "name": "Логово",   "kind": "threat",   "shape": "lair",  "tint": "#3a2a3f", "height": 0.9 }
   },
-  "_terrain_help": "Местность под клеткой. bonus — сколько добавляется зданию своего цвета (color) или любому цветному (color: any).",
+  "_terrain_help": "Местность под клеткой. bonus — сколько добавляется зданию добычи или мастерской своего цвета (color) или любого цвета (color: any).",
   "terrain": {
     "fertile_food":  { "name": "Плодородная земля", "color": "food",  "bonus": 1,  "tint": "#7f9a3a" },
     "fertile_gold":  { "name": "Рудная жила",       "color": "gold",  "bonus": 1,  "tint": "#9a8a4a" },
     "fertile_force": { "name": "Холм",              "color": "force", "bonus": 1,  "tint": "#8a6a5a" },
     "swamp":         { "name": "Болото",            "color": "any",   "bonus": -1, "tint": "#3f4a33" }
   },
-  "starter_deck": { "field": 3, "mill": 3, "mine": 3, "smithy": 3, "barracks": 3, "tower": 3, "house": 2 }
+  "starter_deck": { "field": 3, "mine": 3, "tower": 3, "mill": 2, "smithy": 2, "barracks": 2, "house": 2, "manor": 1, "market": 1, "tavern": 1 }
 }

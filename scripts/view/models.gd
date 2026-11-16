@@ -29,6 +29,9 @@ static func build(id: String, alpha_: float = 1.0) -> Node3D:
 		"barracks": m._barracks()
 		"tower": m._tower()
 		"house": m._house()
+		"manor": m._manor()
+		"market": m._market()
+		"tavern": m._tavern()
 		_: return null
 	return m.root
 
@@ -209,3 +212,49 @@ func _house() -> void:
 	for k in 4:
 		box(Vector3(0.03, 0.12, 0.03), Vector3(-0.36 + k * 0.1, 0.06, 0.4), WOOD)
 	box(Vector3(0.34, 0.025, 0.02), Vector3(-0.21, 0.09, 0.4), WOOD)
+
+
+## Усадьба: большой двухэтажный дом с башенкой и садом.
+func _manor() -> void:
+	box(Vector3(0.78, 0.52, 0.5), Vector3(0, 0.26, -0.05), PLASTER)
+	roof(0.86, 0.34, 0.6, Vector3(0, 0.69, -0.05), Color("#6a4a8a"))
+	cyl(0.13, 0.13, 0.8, Vector3(0.36, 0.4, 0.2), PLASTER, 8)
+	cyl(0.0, 0.18, 0.3, Vector3(0.36, 0.95, 0.2), Color("#6a4a8a"), 8)
+	box(Vector3(0.16, 0.28, 0.03), Vector3(-0.05, 0.14, 0.21), WOOD_DARK)
+	for x in [-0.28, 0.14]:
+		box(Vector3(0.11, 0.11, 0.03), Vector3(x, 0.38, 0.21), Color("#7fb6e0"))
+	box(Vector3(0.11, 0.11, 0.03), Vector3(-0.28, 0.16, 0.21), Color("#7fb6e0"))
+	ball(0.09, Vector3(-0.36, 0.09, 0.38), Color("#4f8a3a"))
+	ball(0.07, Vector3(-0.2, 0.07, 0.4), Color("#4f8a3a"))
+
+
+## Рынок: прилавки под полосатыми навесами, корзины с товаром трёх цветов.
+func _market() -> void:
+	box(Vector3(0.9, 0.04, 0.9), Vector3(0, 0.02, 0), Color("#b8a888"))
+	var awn := [Color("#d94545"), Color("#e8c547"), Color("#6aa84f")]
+	for k in 2:
+		var x := -0.22 + k * 0.44
+		for c in [[-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]]:
+			box(Vector3(0.03, 0.42, 0.03), Vector3(x + c[0], 0.21, c[1]), WOOD_DARK)
+		box(Vector3(0.36, 0.1, 0.34), Vector3(x, 0.17, 0), WOOD)
+		box(Vector3(0.42, 0.04, 0.42), Vector3(x, 0.45, 0), awn[k], Vector3(0, 0, 8 if k == 0 else -8))
+		box(Vector3(0.42, 0.045, 0.1), Vector3(x, 0.47, 0), Color("#f4ecd8"), Vector3(0, 0, 8 if k == 0 else -8))
+	ball(0.06, Vector3(-0.28, 0.26, 0.0), FOOD)
+	ball(0.06, Vector3(-0.16, 0.26, 0.05), Color("#6aa84f"))
+	ball(0.06, Vector3(0.18, 0.26, 0.0), GOLD)
+	ball(0.06, Vector3(0.28, 0.26, 0.05), FORCE)
+	cyl(0.08, 0.06, 0.1, Vector3(0, 0.05, 0.36), WOOD)
+
+
+## Таверна: деревянный дом с вывеской-кружкой и бочками.
+func _tavern() -> void:
+	box(Vector3(0.72, 0.18, 0.52), Vector3(0, 0.09, 0), STONE)
+	box(Vector3(0.72, 0.3, 0.52), Vector3(0, 0.33, 0), Color("#a9784a"))
+	roof(0.8, 0.32, 0.62, Vector3(0, 0.64, 0), Color("#5a7a3a"))
+	box(Vector3(0.14, 0.24, 0.03), Vector3(-0.12, 0.12, 0.27), WOOD_DARK)
+	box(Vector3(0.24, 0.03, 0.03), Vector3(0.25, 0.46, 0.34), WOOD_DARK)
+	box(Vector3(0.14, 0.14, 0.02), Vector3(0.3, 0.37, 0.34), Color("#f2c94c"))
+	box(Vector3(0.06, 0.08, 0.025), Vector3(0.3, 0.37, 0.35), Color("#f4ecd8"))
+	for k in 2:
+		cyl(0.08, 0.08, 0.18, Vector3(0.38 - k * 0.12, 0.09, 0.4 - k * 0.04), WOOD, 8)
+	box(Vector3(0.08, 0.25, 0.08), Vector3(-0.22, 0.85, -0.1), STONE_DARK)

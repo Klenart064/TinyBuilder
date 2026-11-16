@@ -51,6 +51,7 @@ var hand_box: HBoxContainer
 var undo_btn: Button
 var end_btn: Button
 var claim_btn: Button
+var treasury_box: HBoxContainer
 var overlay: Control
 var overlay_text: RichTextLabel
 var overlay_buttons: HBoxContainer
@@ -336,7 +337,7 @@ func _rebuild_board() -> void:
 		match l["type"]:
 			"pair":
 				board_root.add_child(_link_mesh(l["a"], l["b"], 0.12, 0.03, _glow_mat(PAIR_COLOR, 0.9)))
-			"house":
+			"house", "tavern":
 				board_root.add_child(_link_mesh(l["a"], l["b"], 0.07, 0.03, _glow_mat(HOUSE_COLOR, 0.6)))
 			"conflict":
 				board_root.add_child(_link_mesh(l["a"], l["b"], 0.12, 0.03, _glow_mat(CONFLICT_COLOR, 0.9)))
@@ -552,7 +553,7 @@ func _update_hover() -> void:
 	for l in after["links"]:
 		if l["a"] != hover and l["b"] != hover:
 			continue
-		var col := PAIR_COLOR if l["type"] == "pair" else (HOUSE_COLOR if l["type"] == "house" else CONFLICT_COLOR)
+		var col := PAIR_COLOR if l["type"] == "pair" else (CONFLICT_COLOR if l["type"] == "conflict" else HOUSE_COLOR)
 		hover_root.add_child(_link_mesh(l["a"], l["b"], 0.16, 0.2, _glow_mat(col, 0.75)))
 	for j in razed:
 		_frame(j, GROW_COLOR, hover_root, false, 0.08)
@@ -784,6 +785,21 @@ func _build_ui() -> void:
 	side_box.add_theme_constant_override("separation", 8)
 	right.add_child(side_box)
 
+	var tpanel := PanelContainer.new()
+	var tsb := StyleBoxFlat.new()
+	tsb.bg_color = Color(0.08, 0.1, 0.13, 0.92)
+	tsb.set_corner_radius_all(10)
+	tsb.set_content_margin_all(10)
+	tsb.border_color = Color("#f2c94c")
+	tsb.border_width_bottom = 3
+	tpanel.add_theme_stylebox_override("panel", tsb)
+	tpanel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 10)
+	tpanel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	root.add_child(tpanel)
+	treasury_box = HBoxContainer.new()
+	treasury_box.add_theme_constant_override("separation", 18)
+	tpanel.add_child(treasury_box)
+
 	var bottom := VBoxContainer.new()
 	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -1011,6 +1027,8 @@ func _clear(box: Container) -> void:
 func _res_color(res: String) -> String:
 	if res == "grey":
 		return GREY_COLOR.to_html(false)
+	if res == "city":
+		return "#b07ad9"
 	return data.resources.get(res, {}).get("color", "#ffffff")
 
 
@@ -1054,6 +1072,7 @@ func _full_refresh() -> void:
 
 func _refresh_ui() -> void:
 	_refresh_info()
+	_refresh_treasury()
 	_refresh_side()
 	_refresh_hand()
 	_refresh_hint()
@@ -1070,7 +1089,7 @@ func _refresh_info() -> void:
 	var sc: Dictionary = run.score()
 
 	var head := HBoxContainer.new()
-	head.add_child(_label("Поле %d/%d" % [run.field_index, int(data.run["fields_to_win"])], 24, Color.WHITE))
+	head.add_child(_label("Остров %d/%d" % [run.field_index, int(data.run["fields_to_win"])], 24, Color.WHITE))
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(sp)
@@ -1083,7 +1102,7 @@ func _refresh_info() -> void:
 	var heart: Texture2D = _icon_tex("res://assets/icons/heart.svg")
 	var danger := int(sc["discontent"])
 	for k in int(data.run["lives"]):
-		var tr := _icon_rect(heart, 26)
+		var tr := _icon_rect(heart, 22)
 		if k >= run.lives:
 			tr.modulate = Color(0.3, 0.3, 0.3, 0.5)
 		elif k >= run.lives - danger:
@@ -1100,45 +1119,58 @@ func _refresh_info() -> void:
 	lb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 	lb.add_child(_rich_line(LandEvents.describe(run.intent), 15))
 
-	# Задание поля
+	# Плата острова (из казны в конце острова)
 	var prog: Dictionary = run.task_progress(sc)
 	var all_ok := true
 	for r in prog:
 		if prog[r]["have"] < prog[r]["need"]:
 			all_ok = false
-	var tb := _section(info_box, "Задание", Color("#6fcf97") if all_ok else Color("#f2c94c"), 19)
+	var tb := _section(info_box, "Плата острова", Color("#6fcf97") if all_ok else Color("#f2c94c"), 19)
+	tb.get_parent().tooltip_text = "В конце острова платится из казны. Не хватит — минус жизнь за каждую единицу. Джокеры закрывают нехватку любого цвета."
+	tb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 	for r in prog:
-		tb.add_child(_progress_row(r, prog[r]["have"], prog[r]["need"], ("  (запас %d)" % prog[r]["carry"]) if prog[r]["carry"] > 0 else ""))
+		tb.add_child(_progress_row(r, prog[r]["have"], prog[r]["need"], ("  (джокеры %d)" % prog[r]["wild"]) if prog[r]["wild"] > 0 else ""))
 	if all_ok:
-		tb.add_child(_rich_line("[color=#6fcf97]Выполнено! Можно забрать остров (Enter)[/color]", 14))
+		tb.add_child(_rich_line("[color=#6fcf97]Хватает! Можно забрать остров (Enter)[/color]", 14))
 
-	# Повозка: что поедет на следующий остров, если закончить сейчас
-	var cp: Dictionary = run.wagon_load(sc)
-	var sur: Dictionary = run.surplus(sc)
-	var loaded := 0
-	var extra := 0
-	var cs := ""
-	for r in data.resources:
-		loaded += int(cp[r])
-		extra += int(sur[r]) - int(cp[r])
-		if int(cp[r]) > 0:
-			cs += "[b]+%d[/b]%s  " % [int(cp[r]), _img(r, 22)]
-	if extra > 0:
-		cs += "[color=#6b7683]лишнее %d сгорит[/color]" % extra
-	var kb := _section(info_box, "Повозка %d/%d" % [loaded, run.wagon_capacity()], Color("#8ab4f8"), 17)
-	kb.get_parent().tooltip_text = "Излишки едут на следующий остров только в повозке: то, что нужно в его задании, не больше вместимости. Остальное сгорает."
-	kb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-	kb.add_child(_rich_line(cs if cs != "" else "[color=#6b7683]пока ничего[/color]", 17))
-
-	# Глобальная угроза
-	var g: Dictionary = run.global_threat()
-	var left: int = run.global_end_field() - run.field_index
-	var when := "это поле!" if left == 0 else "ещё %d %s" % [left + 1, _plural(left + 1, "поле", "поля", "полей")]
-	var gb := _section(info_box, "%s · %s" % [g["name"], when], Color("#eb5757"), 19)
-	gb.get_parent().tooltip_text = "Весь доход этого ресурса за поля %d–%d. Не хватит — минус %d жизни." % [run.global_start, run.global_end_field(), int(g.get("penalty", 3))]
+	# Ближайший босс / финальная угроза
+	var bs: Dictionary = run.next_boss()
+	var left: int = int(bs["at_field"]) - run.field_index
+	var when := "в конце этого острова!" if left == 0 else "через %d %s" % [left, _plural(left, "остров", "острова", "островов")]
+	var gb := _section(info_box, "%s · %s" % [bs.get("name", ""), when], Color("#eb5757"), 18)
+	gb.get_parent().tooltip_text = "Платится из казны после платы острова. Не хватит — минус %d жизни за каждую единицу." % int(bs.get("life_per_missing", data.run.get("life_per_missing", 1)))
 	gb.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
-	var cur := int(run.global_progress) + int(sc["total"].get(g["resource"], 0))
-	gb.add_child(_progress_row(g["resource"], cur, int(g["need"])))
+	var pool: Dictionary = run.projected(sc)
+	run.pay(pool, run.task)
+	var cost: Dictionary = bs.get("cost", {})
+	for r in cost:
+		var own := mini(int(pool.get(r, 0)), int(cost[r]))
+		pool[r] = int(pool.get(r, 0)) - own
+		var w := mini(int(pool.get("wild", 0)), int(cost[r]) - own)
+		pool["wild"] = int(pool.get("wild", 0)) - w
+		gb.add_child(_progress_row(r, own + w, int(cost[r])))
+
+
+func _refresh_treasury() -> void:
+	_clear(treasury_box)
+	var sc: Dictionary = run.score()
+	treasury_box.add_child(_label("Казна", 20, Color("#c9d1d9")))
+	for r in data.resources:
+		var chip := HBoxContainer.new()
+		chip.add_theme_constant_override("separation", 4)
+		chip.add_child(_icon_rect(_icon(r), 34))
+		chip.add_child(_label(str(int(run.stock.get(r, 0))), 28, Color.WHITE))
+		var inc := int(sc["total"].get(r, 0))
+		if inc > 0:
+			chip.add_child(_label("+%d" % inc, 18, Color("#6fcf97")))
+		treasury_box.add_child(chip)
+	var joy := int(sc.get("joy", 0))
+	if joy > 0:
+		var j := HBoxContainer.new()
+		j.add_child(_icon_rect(_icon_tex("res://assets/icons/heart.svg"), 26))
+		j.add_child(_label("+%d" % joy, 18, Color("#6fcf97")))
+		treasury_box.add_child(j)
+
 
 func _refresh_side() -> void:
 	_clear(side_box)
@@ -1186,14 +1218,13 @@ func _refresh_side() -> void:
 	var gold := _img("gold", 16)
 	var force := _img("force", 16)
 	var t := ""
-	t += "Здание: [b]+1[/b] своего цвета.\n"
-	t += "[color=#ffd866]+2[/color] за сторону с другим зданием своего цвета:\n  Поле+Мельница %s\n  Шахта+Кузница %s\n  Казарма+Башня %s\n" % [food, gold, force]
-	t += "Дом: +1 каждому соседу, не ссорится.\n"
-	t += "[color=#ff8080]Разные цвета рядом: −1%s[/color] в конце поля.\n" % _heart_img(14)
-	t += "Не хватило задания: −1%s за штуку.\n" % _heart_img(14)
-	t += "Озеро: +1%s соседям.\n" % food
+	t += "Доход копится в [b]казне[/b] на весь забег. Из неё платятся острова, боссы и финальная угроза. Не хватило — −1%s за единицу.\n" % _heart_img(14)
+	t += "Добыча (Поле, Шахта, Башня): +2 своего цвета.\n"
+	t += "Мастерская (Мельница, Кузница, Казарма): +1 и [color=#ffd866]+2 за каждую добычу своего цвета рядом[/color].\n"
+	t += "Домик/Усадьба: джокеры %s — закрывают любой цвет.\n" % _img("wild", 14)
+	t += "Рынок: +1 за каждый цвет рядом. Таверна: +1%s за жильё рядом.\n" % _heart_img(14)
+	t += "[color=#ff8080]Добыча и мастерские разных цветов рядом: −1%s[/color].\n" % _heart_img(14)
 	t += "Логово выключает здание по стрелке, %s рядом сносит его.\n" % force
-	t += "Повозка везёт излишки, нужные дальше (до %d).\n" % run.wagon_capacity()
 	t += "[color=#8a96a3]1–4 карта, ПКМ снять, Z отмена, F11 полный экран[/color]"
 	rb.add_child(_rich_line(t, 13))
 
@@ -1253,17 +1284,31 @@ func _card_button(i: int, id: String) -> Button:
 	var title := _label(data.obj_name(id), 20, Color.WHITE)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
-	var t := ""
-	if col == "grey":
-		t = "[b]+1[/b]%s%s%s [color=#a9b4c0]соседям[/color]" % [_img("food", 20), _img("gold", 20), _img("force", 20)]
-	else:
-		var partners := []
-		for p in data.pair_partners(id):
-			partners.append(data.objects[p].get("with", data.obj_name(p)))
-		t = "[b]+1[/b]%s  [color=#ffd866][b]+2[/b][/color]%s [b]%s[/b]" % [_img(col, 22), _img(col, 20), ", ".join(partners)]
+	var t := _card_rules(id)
 	var stats := _rich_line("[center]%s[/center]" % t, 15)
 	v.add_child(stats)
 	return btn
+
+## Короткое правило карты иконками.
+func _card_rules(id: String) -> String:
+	var rules: Dictionary = data.rules
+	var col: String = data.color_of(id)
+	match data.role(id):
+		"base":
+			return "[font_size=22][b]+%d[/b][/font_size]%s" % [int(rules["base"]), _img(col, 26)]
+		"workshop":
+			var partners := []
+			for p in data.pair_partners(id):
+				partners.append(data.objects[p].get("acc", data.obj_name(p)))
+			return "[b]+%d[/b]%s  [color=#ffd866][b]+%d[/b][/color]%s за %s" % [int(rules["workshop_self"]), _img(col, 20), int(rules["workshop_per_base"]), _img(col, 20), "/".join(partners)]
+		"housing":
+			return "[font_size=22][b]+%d[/b][/font_size]%s [color=#a9b4c0]любой цвет[/color]" % [int(data.objects[id].get("wild", 1)), _img("wild", 26)]
+	if id == "market":
+		return "[b]+%d[/b] за каждый цвет рядом %s%s%s" % [int(rules["market_per_color"]), _img("food", 16), _img("gold", 16), _img("force", 16)]
+	if id == "tavern":
+		return "[b]+%d[/b]%s за жильё рядом" % [int(rules["tavern_per_housing"]), _heart_img(18)]
+	return ""
+
 
 ## Картинка здания для карты: модель рендерится в отдельном мире (SubViewport).
 var _card_tex_cache: Dictionary = {}
@@ -1481,34 +1526,24 @@ func _on_claim() -> void:
 
 
 func _show_field_result(res: Dictionary) -> void:
-	var s := "[center][b][font_size=24]Поле %d завершено[/font_size][/b][/center]\n\n" % run.field_index
-	s += "Доход поля: %s\n" % _fmt(res["prod"], true)
-	var task_line := []
-	for r in res["task"]:
-		var have := int(res["prod"].get(r, 0)) + int(res["carry_in"].get(r, 0))
-		task_line.append("%d/%d%s" % [mini(have, int(res["task"][r])), int(res["task"][r]), _img(r)])
-	s += "Задание: %s" % "  ".join(task_line)
+	var s := "[center][b][font_size=24]Остров %d пройден[/font_size][/b][/center]\n\n" % run.field_index
+	s += "Доход в казну: %s\n" % _fmt(res["prod"], true)
+	s += "Плата острова: %s" % _fmt(res["task"])
 	if res["missing"] > 0:
-		s += "  [color=#eb5757]не хватило %d → −%d%s[/color]\n" % [res["missing"], res["missing"], _heart_img()]
+		s += "  [color=#eb5757]не хватило %d → −%d%s[/color]\n" % [res["missing"], res["missing"] * int(data.run.get("life_per_missing", 1)), _heart_img()]
 	else:
-		s += "  [color=#6fcf97]выполнено[/color]\n"
+		s += "  [color=#6fcf97]оплачено[/color]\n"
 	if res["discontent"] > 0:
 		s += "[color=#eb5757]Недовольство: −%d%s[/color]\n" % [res["discontent"], _heart_img()]
-	else:
-		s += "[color=#6fcf97]Без недовольства[/color]\n"
-	var co: Dictionary = res["carry_out"]
-	var any_carry := false
-	for r in co:
-		if int(co[r]) > 0:
-			any_carry = true
-	if any_carry:
-		s += "В повозке на следующий остров: %s\n" % _fmt(co)
-	if res.get("global_checked", false):
-		var g: Dictionary = res["global"]
-		if res["global_passed"]:
-			s += "\n[color=#6fcf97][b]Угроза «%s» отбита![/b][/color] (%d/%d%s)\n" % [g["name"], res["global_progress"], g["need"], _img(g["resource"])]
+	if res["joy"] > 0:
+		s += "[color=#6fcf97]Таверна: +%d%s[/color]\n" % [res["joy"], _heart_img()]
+	if res.has("boss"):
+		var b: Dictionary = res["boss"]
+		if res["boss_missing"] == 0:
+			s += "\n[color=#6fcf97][b]%s: оплачено %s[/b][/color]\n" % [b["name"], _fmt(b["cost"])]
 		else:
-			s += "\n[color=#eb5757][b]Угроза «%s» не отбита[/b][/color] (%d/%d%s): −%d%s\n" % [g["name"], res["global_progress"], g["need"], _img(g["resource"]), int(g.get("penalty", 3)), _heart_img()]
+			s += "\n[color=#eb5757][b]%s: не хватило %d[/b][/color] → −%d%s\n" % [b["name"], res["boss_missing"], res["boss_missing"] * int(b.get("life_per_missing", 1)), _heart_img()]
+	s += "Казна: %s\n" % _fmt(res["stock_after"])
 	s += "\nЖизни: %d → [b]%d[/b]%s" % [res["lives_before"], res["lives_after"], _heart_img()]
 
 	_clear(overlay_buttons)

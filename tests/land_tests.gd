@@ -24,7 +24,7 @@ func _initialize() -> void:
 	test_run_flow()
 	test_undo()
 	test_finish_early()
-	test_wagon()
+	test_treasury()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -40,21 +40,22 @@ func test_scoring() -> void:
 	var f := _square()
 	f.content[0] = "field"
 	var sc: Dictionary = f.score(data)
-	_check(sc["total"]["food"] == 1, "одно Поле даёт +1 еды")
+	_check(sc["total"]["food"] == 2, "Поле (добыча) даёт +2 еды")
 	f.content[1] = "mill"
 	sc = f.score(data)
-	_check(sc["total"]["food"] == 4, "Поле+Мельница рядом: 1+1+2 = 4 еды (%d)" % sc["total"]["food"])
-	f.content[1] = "field"
+	_check(sc["total"]["food"] == 5, "Мельница рядом с Полем: 2 + 1 + 2 = 5 еды (%d)" % sc["total"]["food"])
+	f.content[4] = "field"
+	f.content[5] = "field"
 	sc = f.score(data)
-	_check(sc["total"]["food"] == 2, "два одинаковых Поля: без пары, 2 еды")
+	_check(sc["total"]["food"] == 2 * 3 + 1 + 2 * 2, "Мельница: +2 за каждое соседнее Поле (%d)" % sc["total"]["food"])
+	f.content[4] = ""
+	f.content[5] = ""
 	f.content[1] = "mine"
 	sc = f.score(data)
 	_check(sc["discontent"] == 1, "Поле рядом с Шахтой: +1 недовольство")
-	_check(sc["total"]["gold"] == 1 and sc["total"]["food"] == 1, "разные цвета всё равно дают по +1")
-	f.content[1] = ""
-	f.content[2] = "mill"  # не сосед (между ними пустая клетка 1)
-	_check(f.score(data)["total"]["food"] == 2, "через клетку пары нет")
-
+	_check(sc["total"]["gold"] == 2 and sc["total"]["food"] == 2, "разные цвета всё равно дают своё")
+	f.content[1] = "smithy"
+	_check(f.score(data)["total"]["gold"] == 1, "Кузница без Шахты рядом: только +1")
 
 func test_house_and_terrain() -> void:
 	var f := _square()
@@ -62,18 +63,31 @@ func test_house_and_terrain() -> void:
 	f.content[1] = "field"
 	f.content[4] = "mine"
 	var sc: Dictionary = f.score(data)
-	_check(sc["discontent"] == 0, "Дом не ссорится с соседями")
-	_check(sc["total"]["food"] == 2 and sc["total"]["gold"] == 2, "Дом +1 к цвету каждого соседа")
+	_check(sc["discontent"] == 0, "Домик не ссорится с соседями")
+	_check(sc["total"]["wild"] == 1, "Домик даёт +1 джокер")
+	f.content[6] = "manor"
+	_check(f.score(data)["total"]["wild"] == 3, "Усадьба даёт +2 джокера")
+	var m := _square()
+	m.content[5] = "market"
+	m.content[1] = "field"
+	m.content[4] = "mine"
+	m.content[9] = "mill"
+	var ms: Dictionary = m.score(data)
+	_check(ms["total"]["food"] == 2 + 1 + 1 and ms["total"]["gold"] == 2 + 1, "Рынок: +1 за каждый цвет соседей (еда %d, золото %d)" % [ms["total"]["food"], ms["total"]["gold"]])
+	var t := _square()
+	t.content[5] = "tavern"
+	t.content[1] = "house"
+	t.content[4] = "manor"
+	_check(t.score(data)["joy"] == 2, "Таверна: +1 жизнь за каждое соседнее жильё")
 	var g := _square()
 	g.content[0] = "field"
 	g.terrain[0] = "fertile_food"
-	_check(g.score(data)["total"]["food"] == 2, "плодородная земля +1 зелёному")
+	_check(g.score(data)["total"]["food"] == 3, "плодородная земля +1 зелёному")
 	g.terrain[0] = "swamp"
-	_check(g.score(data)["total"]["food"] == 0, "болото -1")
+	_check(g.score(data)["total"]["food"] == 1, "болото -1")
 	g.terrain[0] = ""
 	g.content[1] = "lake"
-	_check(g.score(data)["total"]["food"] == 2, "озеро +1 соседнему зелёному")
-
+	_check(g.score(data)["total"]["food"] == 3, "озеро +1 соседнему зелёному")
 
 func test_lair() -> void:
 	var f := _square()
@@ -84,7 +98,7 @@ func test_lair() -> void:
 	f.facing[6] = 2
 	sc = f.score(data)
 	_check(5 in sc["disabled"] and sc["disabled"].size() == 1, "Логово выключает соседа по стрелке")
-	_check(sc["total"]["food"] == 1, "выключенное здание ничего не даёт и пары нет")
+	_check(sc["total"]["food"] == 2, "выключенная Мельница ничего не даёт")
 	f.content[5] = "tower"
 	_check(not (5 in f.score(data)["disabled"]), "Логово не выключает военные здания")
 	f.content[5] = "mill"
@@ -173,36 +187,32 @@ func test_run_flow() -> void:
 func test_finish_early() -> void:
 	var run := LandRun.new()
 	run.start(data, 9)
-	_check(run.finish_early().is_empty(), "без выполненного задания досрочно не закончить")
-	var f = run.field
-	for i in f.N:
-		if f.is_free(i):
-			f.content[i] = "house"
+	_check(run.finish_early().is_empty(), "без платы острова досрочно не закончить")
 	for r in run.task:
-		run.carry[r] = 99
+		run.stock[r] = 99
 	var r2: Dictionary = run.finish_early()
-	_check(r2.get("field_done", false) and r2["result"]["missing"] == 0, "задание выполнено — остров можно забрать досрочно")
+	_check(r2.get("field_done", false) and r2["result"]["missing"] == 0, "плата есть — остров можно забрать досрочно")
+	_check(int(run.stock[run.task.keys()[0]]) < 99, "плата острова списана из казны")
 
-
-func test_wagon() -> void:
+func test_treasury() -> void:
+	var pool := {"food": 2, "gold": 0, "force": 0, "wild": 3}
+	var p: Dictionary = LandRun.pay(pool, {"food": 4, "gold": 2})
+	_check(p["missing"] == 1 and pool["wild"] == 0 and pool["food"] == 0, "джокеры закрывают нехватку, остаток — недостача (%s)" % str(p))
 	var run := LandRun.new()
 	run.start(data, 4)
-	run.next_field["task"] = {"food": 2, "gold": 5}
-	run.task = {"force": 1}
-	run.carry = data.zero_res()
-	var f = run.field
-	for i in f.N:
-		f.content[i] = ""
-	var free: Array = f.free_cells()
-	f.content[free[0]] = "field"
-	f.content[free[1]] = "mine"
-	f.content[free[2]] = "barracks"
-	f.content[free[3]] = "mine"
-	var load: Dictionary = run.wagon_load()
-	var total := 0
-	for r in load:
-		total += int(load[r])
-	_check(total <= 3 and int(load["force"]) == 0, "повозка: не больше 3 и только нужное дальше (%s)" % str(load))
+	run.stock = {"food": 10, "gold": 10, "force": 10, "wild": 0}
+	var before := 0
+	for r in run.stock:
+		before += int(run.stock[r])
+	for _t in 3:
+		run.end_turn()
+	var after := 0
+	for r in run.stock:
+		after += int(run.stock[r])
+	var need := 0
+	for r in run.task:
+		need += int(run.task[r])
+	_check(not run.game_over, "казна пережила остров")
 
 
 func test_undo() -> void:

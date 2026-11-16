@@ -9,6 +9,7 @@ var starter_deck: Dictionary = {}
 var run: Dictionary = {}
 var rules: Dictionary = {}
 var events: Dictionary = {}  # id -> описание события
+var colors: Array = []       # цвета-ресурсы без джокера
 
 
 func load_all(dir: String = "res://data/land") -> bool:
@@ -22,6 +23,10 @@ func load_all(dir: String = "res://data/land") -> bool:
 	starter_deck = cards["starter_deck"]
 	run = run_file
 	rules = run_file["rules"]
+	colors = []
+	for r in resources:
+		if not resources[r].get("wild", false):
+			colors.append(r)
 	events = {}
 	for e in run_file["events"]:
 		events[e["id"]] = e
@@ -41,17 +46,18 @@ func validate() -> bool:
 				ok = false
 	for id in objects:
 		var c: String = objects[id].get("color", "")
-		if kind(id) == "building" and c != "grey" and not resources.has(c):
+		if kind(id) == "building" and c != "wild" and c != "city" and not resources.has(c):
 			push_error("objects.%s: неизвестный цвет '%s'" % [id, c])
 			ok = false
 	for t in run.get("terrain_pool", {}):
 		if not terrain.has(t):
 			push_error("terrain_pool: неизвестная местность '%s'" % t)
 			ok = false
-	for g in run.get("global_threats", []):
-		if not resources.has(g.get("resource", "")):
-			push_error("global_threats: неизвестный ресурс '%s'" % g.get("resource", ""))
-			ok = false
+	for b in run.get("bosses", []) + [run.get("final_threat", {})]:
+		for r in b.get("cost", {}):
+			if not resources.has(r):
+				push_error("bosses/final_threat: неизвестный ресурс '%s'" % r)
+				ok = false
 	return ok
 
 
@@ -65,7 +71,20 @@ func is_building(id: String) -> bool:
 	return kind(id) == "building"
 
 
-## food / gold / force / grey, "" для не-зданий.
+## Роль здания: base, workshop, housing, city.
+func role(id: String) -> String:
+	if not is_building(id):
+		return ""
+	return objects[id].get("role", "")
+
+
+## Здание добычи или мастерская (у них есть цвет и они ссорятся с другими цветами).
+func is_producer(id: String) -> bool:
+	var r := role(id)
+	return r == "base" or r == "workshop"
+
+
+## food / gold / force / wild / city, "" для не-зданий.
 func color_of(id: String) -> String:
 	if not is_building(id):
 		return ""
@@ -83,14 +102,14 @@ func zero_res() -> Dictionary:
 	return d
 
 
-## Цветные карты, кроме id, того же цвета (партнёры для пары).
+## Партнёры: для мастерской — добыча её цвета, для добычи — мастерская её цвета.
 func pair_partners(id: String) -> Array:
 	var out := []
-	var c := color_of(id)
-	if c == "grey" or c == "":
+	var want := "base" if role(id) == "workshop" else ("workshop" if role(id) == "base" else "")
+	if want == "":
 		return out
 	for other in objects:
-		if other != id and color_of(other) == c:
+		if role(other) == want and color_of(other) == color_of(id):
 			out.append(other)
 	return out
 

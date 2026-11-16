@@ -89,7 +89,7 @@ static func make_task(data, rng: RandomNumberGenerator, index: int) -> Dictionar
 			break
 	var patterns: Array = tier["patterns"]
 	var pat: Array = patterns[rng.randi_range(0, patterns.size() - 1)].duplicate()
-	var res: Array = data.resources.keys()
+	var res: Array = data.colors.duplicate()
 	_shuffle(res, rng)
 	var task := {}
 	for k in mini(pat.size(), res.size()):
