@@ -1033,6 +1033,17 @@ func _icon(res: String) -> Texture2D:
 
 # ---------------------------------------------------------------- Эффекты
 
+## Всплывающие цифры дохода при контакте и короткая вспышка казны.
+func _float_contact(gains: Dictionary) -> void:
+	if gains.is_empty():
+		return
+	for c in gains:
+		_float_badge(int(c), gains[c])
+	var tw := create_tween()
+	tw.tween_property(treasury_box, "modulate", Color(1.5, 1.5, 1.1), 0.1)
+	tw.tween_property(treasury_box, "modulate", Color.WHITE, 0.35)
+
+
 func _float_badge(cell: int, amounts: Dictionary) -> void:
 	if amounts.is_empty():
 		return
@@ -1133,6 +1144,7 @@ func _show_toast(text: String) -> void:
 
 
 func _announce_field() -> void:
+	_float_contact(run.start_contact)
 	var ev: Dictionary = run.event_info()
 	_show_toast("[center][b]Остров %d: %s[/b]\n[font_size=16]%s[/font_size][/center]" % [run.field_index, ev.get("name", ""), ev.get("desc", "")])
 
@@ -1584,7 +1596,7 @@ func _refresh_treasury() -> void:
 		chip.add_child(_icon_rect(_icon(r), 34))
 		var shown: Dictionary = _treasury_shown if _treasury_shown != null else run.stock
 		chip.add_child(_label(str(int(shown.get(r, 0))), 28, Color.WHITE))
-		var inc := int(run.income(sc).get(r, 0))
+		var inc := int(run.income(sc).get(r, 0)) if run.is_cube() else 0
 		if inc > 0:
 			chip.add_child(_label("+%d" % inc, 18, Color("#6fcf97")))
 		treasury_box.add_child(chip)
@@ -1651,6 +1663,7 @@ func _refresh_side() -> void:
 	t += "[color=#f2c94c]Уровни зданий[/color] (пристройки на модели): добыча — мастерские своего цвета, гора/озеро, плодородная земля; мастерская — добыча своего цвета; жильё — здания рядом; Рынок — цвета рядом; Таверна — жильё рядом.\n"
 	t += "[color=#ff9f43][b]Кузница[/b][/color] (1 остров на спринт): соберите рецепт из соседей Наковальни — сталь; босс со сталью требует ×0,85.\n"
 	t += "[b]Гора[/b]: Шахтам рядом +2%s. [b]Озеро[/b]: Полю и Мельнице рядом +1%s.\n" % [_img("gold", 14), _img("food", 14)]
+	t += "[b]Доход при контакте[/b]: здание платит сразу, как только поставлено, и каждый раз, когда у него появляется новый сосед-связка. Связь разорвалась — заработанное остаётся.\n"
 	t += "Весь доход островов идёт в [b]казну[/b]. Казна тратится на [b]рынке[/b] после спринта: новые карты, улучшения, удаление, лечение.\n"
 	t += "Задание острова — по желанию, за него награда. Опасные острова (рушат постройки) дают больше.\n"
 	t += "[color=#eb5757]Босс[/color]: на его острове нужно произвести N всего, иначе −1%s за единицу.\n" % _heart_img(14)
@@ -1974,15 +1987,24 @@ func _try_place(cell: int) -> void:
 	if not r["ok"]:
 		return
 	selected = -1
+	# Во время Эхо казна растёт по шагам: начинаем с казны после дохода при контакте
+	if not r["echo"].is_empty():
+		shown = run.stock.duplicate()
+		for res in r["gain"]:
+			shown[res] = int(shown.get(res, 0)) - int(r["gain"][res])
 	_treasury_shown = shown if not r["echo"].is_empty() else null
 	_full_refresh()
 	var after: Dictionary = run.score()
-	var d := {}
-	for res in data.resources:
-		var v := int(after["total"].get(res, 0)) - int(before["total"].get(res, 0))
-		if v != 0:
-			d[res] = v
-	_float_badge(cell, d)
+	if run.is_cube():
+		var d := {}
+		for res in data.resources:
+			var v := int(after["total"].get(res, 0)) - int(before["total"].get(res, 0))
+			if v != 0:
+				d[res] = v
+		_float_badge(cell, d)
+	else:
+		# Доход при контакте: сразу всплывает над каждым зданием, которому прибавилось, и уходит в казну
+		_float_contact(r.get("contact", {}))
 	for l in after["links"]:
 		if (l["a"] == cell or l["b"] == cell) and l["type"] == "pair":
 			_flash_tile(l["a"] if l["b"] == cell else l["b"], PAIR_COLOR)
@@ -2093,6 +2115,7 @@ func _on_end_turn() -> void:
 		await _animate_shift(r["shift"])
 	busy = false
 	_full_refresh()
+	_float_contact(r.get("contact", {}))
 	if r.get("field_done", false):
 		_show_field_result(r["result"])
 	elif _is_cube() and run.cube_roll and run.field.one_way():
@@ -2119,7 +2142,7 @@ func _show_field_result(res: Dictionary) -> void:
 	if res.has("cube"):
 		s += "Добыча куба в казну (%d%%): %s\n" % [roundi(100.0 * float(res["island"]["boss"]["cube"].get("treasury_share", 0.5))), _fmt(res["prod"], true)]
 	else:
-		s += "Доход острова в казну: %s\n" % _fmt(res["prod"], true)
+		s += "Заработано на острове (уже в казне): %s\n" % _fmt(res["prod"], true)
 	if run.sum_res(res.get("echo", {})) > 0:
 		s += ("[color=#5fe3ff]Эхо за бой (уже в казне):[/color] %s\n" if res.has("cube") else "[color=#5fe3ff]Из них от Эхо:[/color] %s\n") % _fmt(res["echo"], true)
 	if not res["reward"].is_empty():

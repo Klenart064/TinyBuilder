@@ -50,6 +50,13 @@ var victory := false
 
 ## Доход острова от Эхо (сверх обычного, уже лежит в казне)
 var echo_gain: Dictionary = {}
+## Доход при контакте: здание платит сразу при постройке и при каждом новом соседстве,
+## разрыв связи ничего не отнимает. contact_gain — заработано так на этом острове (уже в казне).
+var contact_gain: Dictionary = {}
+## Доход каждой клетки на момент последнего начисления
+var _ysnap: Array = []
+## Что принесли стоявшие заранее здания при входе на остров {клетка: {ресурс: n}}
+var start_contact: Dictionary = {}
 ## Сталь с островов-кузниц: босс тратит одну и требует меньше
 var steel := 0
 
@@ -244,6 +251,9 @@ func choose_island(i: int) -> void:
 	deck._shuffle(deck.draw_pile)
 	hand = deck.draw(int(data.run["hand_size"]))
 	echo_gain = data.zero_res()
+	contact_gain = data.zero_res()
+	_ysnap = []
+	start_contact = _contact()
 	turn = 1
 	plays_left = plays_per_turn()
 	_history.clear()
@@ -350,7 +360,7 @@ func can_place(hand_idx: int, cell: int) -> bool:
 func place(hand_idx: int, cell: int) -> Dictionary:
 	if not can_place(hand_idx, cell):
 		return {"ok": false, "razed": []}
-	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "echo": echo_gain.duplicate()})
+	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "echo": echo_gain.duplicate(), "contact": contact_gain.duplicate(), "snap": _ysnap.duplicate(true)})
 	var id: String = hand[hand_idx]
 	hand.remove_at(hand_idx)
 	var razed: Array = field.place_building(data, cell, id)
@@ -361,7 +371,32 @@ func place(hand_idx: int, cell: int) -> Dictionary:
 	_add_stock(gain)
 	for r in gain:
 		echo_gain[r] = int(echo_gain.get(r, 0)) + int(gain[r])
-	return {"ok": true, "razed": razed, "echo": steps, "gain": gain}
+	var contact := _contact()
+	return {"ok": true, "razed": razed, "echo": steps, "gain": gain, "contact": contact}
+
+
+## Начислить доход новых контактов: прирост дохода каждой клетки с прошлого раза идёт в казну сразу.
+## Падение (связь разорвана, здание выключено) ничего не отнимает. У боссов-фигур — по-старому, в конце.
+func _contact() -> Dictionary:
+	if is_cube():
+		return {}
+	var sc: Dictionary = field.score(data)
+	var cur := []
+	for c in sc["cells"]:
+		cur.append(c["yield"].duplicate())
+	var out := {}
+	for i in cur.size():
+		for r in cur[i]:
+			var was := int(_ysnap[i].get(r, 0)) if i < _ysnap.size() else 0
+			var d := int(cur[i][r]) - was
+			if d > 0:
+				if not out.has(i):
+					out[i] = {}
+				out[i][r] = d
+				contact_gain[r] = int(contact_gain.get(r, 0)) + d
+				stock[r] = int(stock.get(r, 0)) + d
+	_ysnap = cur
+	return out
 
 
 func can_undo() -> bool:
@@ -382,6 +417,8 @@ func undo() -> bool:
 	plays_left = h["plays"]
 	stock = h["stock"]
 	echo_gain = h["echo"]
+	contact_gain = h["contact"]
+	_ysnap = h["snap"]
 	return true
 
 
@@ -405,6 +442,8 @@ func end_turn() -> Dictionary:
 	var land: Dictionary = LandEvents.apply(intent, field, data)
 	_history.clear()
 	var out := {"land": land, "field_done": false}
+	# Земля сдвинулась — новые соседства платят сразу
+	out["contact"] = _contact()
 	if turn >= turns_here():
 		out["field_done"] = true
 		out["result"] = _finish_field()
@@ -412,6 +451,9 @@ func end_turn() -> Dictionary:
 	# Остров из частей: смена острова, поворот или переворот
 	if field.has_method("advance"):
 		out["shift"] = field.advance()
+		var more := _contact()
+		for c in more:
+			out["contact"][c] = more[c]
 	turn += 1
 	plays_left = plays_per_turn()
 	var need := int(data.run["hand_size"]) - hand.size()
@@ -486,7 +528,8 @@ func income(sc: Dictionary = {}) -> Dictionary:
 		sc = score()
 	if is_cube():
 		return cube_have(sc)
-	var t: Dictionary = sc["total"].duplicate()
+	# Всё уже заработанное на острове: контакты + Эхо
+	var t: Dictionary = contact_gain.duplicate()
 	for r in echo_gain:
 		t[r] = int(t.get(r, 0)) + int(echo_gain[r])
 	return t
@@ -514,8 +557,7 @@ func _finish_field() -> Dictionary:
 		prod = gain
 		res["prod"] = gain
 		_add_stock(gain)
-	else:
-		_add_stock(sc["total"])
+	# обычный остров: доход уже в казне (начислялся при каждом контакте)
 	_add_stock(island.get("reward", {}))
 	res["reward"] = island.get("reward", {})
 	res["task"] = task.duplicate()

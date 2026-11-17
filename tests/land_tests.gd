@@ -429,19 +429,39 @@ func test_echo() -> void:
 	var f := _square()
 	run.field = f
 	run.stock = data.zero_res()
+	run.contact_gain = data.zero_res()
+	run._ysnap = []
 	run.plays_left = 4
-	# Без Эхо ничего не срабатывает при постройке: доход только в конце острова
+	# Без Эхо: доход при контакте — постройка и новое соседство платят сразу
 	run.hand = ["mill", "field"]
 	run.place(0, 5)
 	var r: Dictionary = run.place(0, 4)
-	_check(r["echo"].is_empty() and run.stock["food"] == 0, "обычная карта: доход в конце острова, не сразу")
+	_check(r["echo"].is_empty() and run.stock["food"] == run.score()["total"]["food"] and r["contact"].has(5) and r["contact"].has(4), "доход при контакте: Поле и Мельница платят сразу (%d)" % run.stock["food"])
+	var before_echo: int = run.stock["food"]
 	# Эхо I: соседи срабатывают ещё раз сверх обычного
 	run.hand = ["field*1"]
 	r = run.place(0, 6)
 	_check(r["echo"].size() == 1 and r["echo"][0]["cell"] == 5 and int(r["gain"]["food"]) == 1 + 2 + 2, "Эхо I: Мельница рядом срабатывает ещё раз (+5 сразу, %s)" % str(r["gain"]))
-	_check(run.stock["food"] == 5 and run.income()["food"] == run.score()["total"]["food"] + 5, "доход Эхо сразу в казне и идёт в доход острова")
+	_check(run.stock["food"] == run.score()["total"]["food"] + 5 and run.income()["food"] == run.score()["total"]["food"] + 5, "доход Эхо сразу в казне и идёт в доход острова")
 	run.undo()
-	_check(run.stock["food"] == 0 and int(run.echo_gain["food"]) == 0, "отмена возвращает казну")
+	_check(run.stock["food"] == before_echo and int(run.echo_gain["food"]) == 0, "отмена возвращает казну")
+	# Разрыв ничего не отнимает, новое соседство платит снова
+	var g2 := _square()
+	run.field = g2
+	run.stock = data.zero_res()
+	run.contact_gain = data.zero_res()
+	run._ysnap = []
+	run.plays_left = 4
+	run.hand = ["mill", "field"]
+	run.place(0, 5)
+	run.place(0, 6)
+	var paid: int = run.stock["food"]
+	g2.content[6] = ""
+	run._contact()
+	_check(run.stock["food"] == paid, "доход при контакте: снесли Поле — заработанное остаётся")
+	g2.content[4] = "field"
+	run._contact()
+	_check(run.stock["food"] == paid + data.val("field", "base") + data.val("mill", "per_base"), "новое соседство платит снова")
 	# Эхо II: волна на 2 шага по связкам (Поле 2 — Мельница 1? нет; Мельница 5 — Поле 4 — дальше нет связки)
 	var g := _square()
 	g.content[0] = "field"
