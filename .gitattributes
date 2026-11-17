@@ -1,0 +1,8 @@
+# Всегда LF в репозитории и в рабочей копии — Godot пишет файлы с LF,
+# так Windows не будет показывать лишние изменения.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.wav binary
+*.ogg binary
+*.glb binary
