@@ -6,6 +6,8 @@ const LandEvents = preload("res://scripts/land/land_events.gd")
 
 
 static func play_turn(run, smart: bool = true) -> void:
+	if run.is_cube() and run.cube_roll:
+		roll_cube(run, smart)
 	while run.plays_left > 0 and not run.hand.is_empty():
 		var free: Array = run.field.free_cells()
 		if free.is_empty():
@@ -41,7 +43,7 @@ static func value(run, f, gain: Dictionary) -> float:
 		v += float(sc["total"][r]) * (1.3 if r == "wild" else 1.0)
 	var have: Dictionary = sc["total"].duplicate()
 	for r in run.echo_gain:
-		have[r] = int(have.get(r, 0)) + int(run.echo_gain[r]) + int(gain.get(r, 0))
+		have[r] = int(have.get(r, 0)) + int(run.echo_gain[r]) - int(run.cube_echo_base.get(r, 0)) + int(gain.get(r, 0))
 	if not run.task.is_empty():
 		var short := 0
 		for r in run.task:
@@ -50,7 +52,10 @@ static func value(run, f, gain: Dictionary) -> float:
 		for r in run.island.get("task_reward", {}):
 			rew += int(run.island["task_reward"][r])
 		v += float(rew) * 1.3 if short == 0 else -0.3 * float(short)
-	if run.is_boss():
+	if run.is_cube():
+		var miss: int = run.ShapeField.shortfall(have, g.seals[g.top()]) if not g.broken[g.top()] else 0
+		v -= 3.5 * float(miss)
+	elif run.is_boss():
 		var miss := maxi(0, run.boss_need() - run.sum_res(have))
 		v -= 3.5 * float(miss)
 	if run.island.has("forge") and g.recipe_met(run.data, run.island["forge"]):
@@ -58,6 +63,50 @@ static func value(run, f, gain: Dictionary) -> float:
 	v -= 3.5 * float(sc["discontent"])
 	v += 3.0 * float(mini(int(sc.get("joy", 0)), int(run.data.run["lives"]) - run.lives))
 	return v
+
+
+## Куб: прикинуть для каждой соседней грани, сколько не хватит после 2 жадных построек;
+## катить туда, где выгоднее (снять печать, поменьше потерять, иначе передышка).
+static func roll_cube(run, smart: bool = true) -> void:
+	var opts: Array = run.roll_options()
+	if opts.is_empty():
+		return
+	if not smart:
+		run.roll(opts[run.rng.randi_range(0, opts.size() - 1)])
+		return
+	var best: int = opts[0]
+	var best_v := -999.0
+	var left: int = run.turns_here() - run.turn
+	for f in opts:
+		var g = run.field.clone()
+		g.roll_to(f)
+		var hand: Array = run.hand.duplicate()
+		for _k in run.plays_per_turn():
+			var pick := []
+			var pick_v := -999.0
+			for h in hand.size():
+				for c in g.free_cells():
+					var t = g.clone()
+					t.place_building(run.data, c, hand[h])
+					var sc: Dictionary = t.score(run.data)
+					var v := -3.0 * float(run.ShapeField.shortfall(sc["total"], t.seals[f])) + 0.2 * float(run.sum_res(sc["total"])) - 2.0 * float(sc["discontent"])
+					if v > pick_v:
+						pick_v = v
+						pick = [h, c]
+			if pick.is_empty():
+				break
+			g.place_building(run.data, pick[1], hand[pick[0]])
+			hand.remove_at(pick[0])
+		var miss: int = run.ShapeField.shortfall(g.score(run.data)["total"], g.seals[f])
+		var v := 0.0
+		if g.broken[f]:
+			v = -1.5 if left > run.field.sealed_faces().size() else -6.0
+		else:
+			v = 4.0 if miss == 0 else -float(miss)
+		if v > best_v:
+			best_v = v
+			best = f
+	run.roll(best)
 
 
 ## Выбор острова на карте: спокойные проще, опасные дают больше; задание — плюс.

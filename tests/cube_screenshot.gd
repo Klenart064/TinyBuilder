@@ -1,0 +1,122 @@
+## Скриншоты босса-куба (нужен экран или xvfb):
+##   godot --path . -s tests/cube_screenshot.gd -- out_dir [cube|tetra|drum]
+## Бот доигрывает до куба, потом кадры: карта с кубом, выбор поворота, стройка, куб с постройками.
+extends SceneTree
+
+const LandBot = preload("res://scripts/land/land_bot.gd")
+
+var main
+var out_dir := "user://"
+var shape := "cube"
+
+
+func _initialize() -> void:
+	var args := OS.get_cmdline_user_args()
+	if args.size() > 0:
+		out_dir = args[0]
+	if args.size() > 1:
+		shape = args[1]
+	main = load("res://scenes/land.tscn").instantiate()
+	root.add_child(main)
+	_run.call_deferred()
+
+
+func _run() -> void:
+	await _frames(5)
+	main._new_run(7)
+	var r = main.run
+	# Бот доигрывает до босса-фигуры
+	while not (r.phase == "map" and r.choices.size() == 1 and r.choices[0].get("boss", {}).get("cube", {}).get("shape", "") == shape):
+		if r.phase == "map":
+			r.choose_island(LandBot.pick_island(r, true))
+		elif r.phase == "market":
+			LandBot.shop(r, true)
+			r.leave_market()
+		LandBot.play_turn(r, true)
+		r.lives = maxi(r.lives, 30)
+		r.end_turn()
+		if r.game_over:
+			print("бот проиграл до куба")
+			quit()
+			return
+	r.lives = maxi(r.lives, 9)
+	main._show_map()
+	main.map_hover = r.choices[0]
+	main._refresh_map_detail()
+	await _frames(8)
+	_save("%s_map.png" % shape)
+	main._on_choose_island(0)
+	main.toast.visible = false
+	await _frames(4)
+	# Выбор поворота: курсор на правой стороне
+	var opts: Array = r.roll_options()
+	main.roll_hover = opts[0] if not opts.is_empty() else -1
+	main._full_refresh()
+	await _frames(8)
+	_save("%s_roll.png" % shape)
+	# Пара ходов ботом, потом свой ход с призраком карты
+	for _t in 3:
+		LandBot.play_turn(r, true)
+		r.end_turn()
+	if r.cube_roll:
+		LandBot.roll_cube(r, true)
+	main.roll_hover = -1
+	main._full_refresh()
+	main.toast.visible = false
+	main.selected = 0
+	main.hover = r.field.free_cells()[0] if not r.field.free_cells().is_empty() else -1
+	main._full_refresh()
+	await _frames(8)
+	_save("%s_build.png" % shape)
+	main._turn_camera(1)
+	await _seconds(0.6)
+	main.toast.visible = false
+	main.selected = 0
+	main.hover = r.field.free_cells()[0] if not r.field.free_cells().is_empty() else -1
+	main._full_refresh()
+	await _frames(6)
+	_save("%s_cam_q.png" % shape)
+	main._turn_camera(-1)
+	await _seconds(0.6)
+	# Анимация поворота: середина
+	LandBot.play_turn(r, true)
+	r.end_turn()
+	main.selected = -1
+	main.hover = -1
+	main._full_refresh()
+	main.toast.visible = false
+	await _frames(4)
+	_save("%s_roll2.png" % shape)
+	if not r.roll_options().is_empty():
+		main._on_roll(r.roll_options()[0])
+		await _seconds(0.3)
+		_save("%s_rolling.png" % shape)
+		await _seconds(0.6)
+	main.toast.visible = false
+	await _frames(4)
+	_save("%s_after_roll.png" % shape)
+	# Доиграть бой и показать итог
+	while r.phase == "island":
+		LandBot.play_turn(r, true)
+		var res: Dictionary = r.end_turn()
+		if res.get("field_done", false):
+			main._full_refresh()
+			main._show_field_result(res["result"])
+	await _frames(8)
+	_save("%s_result.png" % shape)
+	quit()
+
+
+func _seconds(t: float) -> void:
+	await create_timer(t).timeout
+
+
+func _frames(n: int) -> void:
+	for _i in n:
+		await process_frame
+
+
+func _save(name: String) -> void:
+	var img := root.get_viewport().get_texture().get_image()
+	img.save_png(out_dir.path_join(name))
+	print("saved ", out_dir.path_join(name))

@@ -27,6 +27,9 @@ func _initialize() -> void:
 	test_treasury()
 	test_echo()
 	test_forge()
+	test_cube()
+	test_menu()
+	test_parts()
 	print("\n%s" % ("ВСЕ ТЕСТЫ ПРОШЛИ" if failures == 0 else "ПРОВАЛЕНО: %d" % failures))
 	quit(1 if failures > 0 else 0)
 
@@ -229,30 +232,37 @@ func test_run_flow() -> void:
 		if int(run.stock[res]) < int(stock_before[res]) + int(prod[res]):
 			ok = false
 	_check(ok, "весь доход острова (поле + Эхо) ушёл в казну, платы нет")
-	# Конец первого спринта — рынок
-	for _k in 2:
-		run.choose_island(0)
-		for _t in 3:
-			run.end_turn()
-	_check(run.phase == "market" and run.market["buy"].size() == 3, "после спринта — рынок с 3 картами")
-	run.leave_market()
-	_check(run.phase == "map" and run.sprint == 1, "с рынка — в следующий спринт")
-	# Босс на последнем острове 2-го спринта
-	run.choose_island(0)
-	for _t in 3:
-		run.end_turn()
+	# Конец первого спринта: босс-тетраэдр
 	run.choose_island(0)
 	for _t in 3:
 		run.end_turn()
 	_check(run.choices.size() == 1 and run.choices[0].has("boss"), "перед боссом — один остров с боссом")
 	run.choose_island(0)
-	for _t in 2:
-		run.end_turn()
+	_check(run.is_cube() and run.cube_roll and run.field.shape == "tetra", "босс 1-го спринта — тетраэдр, сначала нужно катить")
+	_check(run.end_turn().is_empty(), "без поворота проверить печать нельзя")
+	var opts: Array = run.roll_options()
+	_check(opts.size() == 3, "тетраэдр катится на любую из 3 других граней")
+	run.roll(opts[0])
+	_check(run.field.top() == opts[0] and not run.cube_roll and run.plays_left == run.plays_per_turn(), "фигура повернулась, можно строить")
 	var lives := run.lives
-	var need := int(run.island["boss"]["need"]) - run.income_total()
+	var miss: int = run.cube_shortfall()
 	r = run.end_turn()
-	_check(r["result"]["boss_missing"] == maxi(0, need), "босс считает весь доход острова (не хватило %d)" % r["result"]["boss_missing"])
-	_check(run.game_over or run.lives <= lives - r["result"]["boss_missing"] + r["result"]["joy"], "нехватка на боссе снимает жизни")
+	_check(r.has("cube") and r["cube"]["miss"] == miss and run.lives == lives - miss, "пустая грань: минус жизнь за каждую недостающую единицу (%d)" % miss)
+	_check(run.cube_roll and run.turn == 2, "следующий ход снова начинается с поворота")
+	run.lives = 99
+	var guard := 0
+	while run.phase == "island" and guard < 20:
+		LandBot.play_turn(run, true)
+		run.end_turn()
+		guard += 1
+	_check(run.phase == "market" and run.market["buy"].size() == 3, "после босса спринта — рынок с 3 картами")
+	run.leave_market()
+	_check(run.phase == "map" and run.sprint == 1, "с рынка — в следующий спринт")
+	# Барабан катится сам и только вперёд
+	var ShapeField = LandRun.ShapeField
+	var d = ShapeField.new("drum")
+	var t0: int = d.top()
+	_check(d.one_way() and d.roll_targets() == [(t0 + 1) % 6], "барабан: следующая грань одна, назад нельзя")
 	var run2 = _play(11)
 	_check(run2.game_over, "забег ботом доходит до конца (остров %d, жизни %d)" % [run2.field_index, run2.lives])
 	var wins := 0
@@ -260,6 +270,81 @@ func test_run_flow() -> void:
 		if _play(100 + s).victory:
 			wins += 1
 	_check(wins >= 4, "жадный бот выигрывает часть забегов (%d/10)" % wins)
+
+
+func test_cube() -> void:
+	var ShapeField = LandRun.ShapeField
+	var c = ShapeField.new()
+	var four := true
+	for i in 54:
+		if c.nbs(i).size() != 4:
+			four = false
+	_check(four, "куб: у каждой клетки 4 соседа (через рёбра тоже)")
+	var cross := 0
+	for j in c.nbs(0):
+		if c.face_of(j) != 0:
+			cross += 1
+	_check(cross == 2, "угловая клетка грани соседствует с двумя другими гранями")
+	var t0: int = c.top()
+	var sides: Dictionary = c.side_faces()
+	var f: int = sides.keys()[0]
+	c.roll_to(f)
+	_check(c.top() == f and c.side_faces().has(t0), "поворот: соседняя грань наверху, бывшая верхняя — сбоку")
+	# Мастерская на ребре видит добычу соседней грани
+	var top: int = c.top()
+	var edge := -1
+	var other := -1
+	for i in range(top * 9, top * 9 + 9):
+		for j in c.nbs(i):
+			if c.face_of(j) != top and edge < 0:
+				edge = i
+				other = j
+	c.content[edge] = "mill"
+	c.content[other] = "field"
+	var sc: Dictionary = c.score(data)
+	_check(int(sc["total"].get("food", 0)) == data.val("mill", "self") + data.val("mill", "per_base"), "Мельница на ребре получает бонус от Поля на соседней грани")
+	_check(int(sc["faces"][c.face_of(other)].get("food", 0)) == data.val("field", "base"), "Поле считается на своей грани")
+	c.seals[top] = {"food": 5, "gold": 1}
+	_check(ShapeField.shortfall({"food": 4, "wild": 1}, c.seals[top]) == 1, "печать: джокер закрывает одну недостающую единицу")
+	_check(not c.is_free(other), "на боковой грани строить нельзя")
+	# Бой: снятая печать, итог
+	var run := LandRun.new()
+	run.start(data, 5)
+	var guard := 0
+	while not run.is_cube() and guard < 500:
+		if run.phase == "map":
+			run.choose_island(0)
+		elif run.phase == "market":
+			run.leave_market()
+		run.end_turn()
+		guard += 1
+	run.lives = 99
+	var faces_seen := {}
+	var res := {}
+	guard = 0
+	while run.phase == "island" and guard < 30:
+		LandBot.play_turn(run, true)
+		var r: Dictionary = run.end_turn()
+		if r.has("cube"):
+			faces_seen[r["cube"]["face"]] = true
+		if r.get("field_done", false):
+			res = r["result"]
+		guard += 1
+	_check(res.has("cube") and int(res["cube"]["turns"]) <= int(run.cube_cfg().get("max_turns", 12)), "бой с фигурой заканчивается (снято %d из %d за %d ходов)" % [res.get("cube", {}).get("broken", -1), res.get("cube", {}).get("faces", -1), res.get("cube", {}).get("turns", -1)])
+	_check(run.phase == "market", "после босса-фигуры — рынок")
+	# Тетраэдр и барабан: соседство клеток и граней
+	var t = ShapeField.new("tetra")
+	var tri := true
+	for i in t.cells_n():
+		if t.nbs(i).size() != 3:
+			tri = false
+	_check(t.cells_n() == 36 and tri and t.roll_targets().size() == 3, "тетраэдр: 36 треугольных клеток по 3 соседа, все грани рядом")
+	var d = ShapeField.new("drum")
+	var ok := d.cells_n() == 54
+	for i in d.cells_n():
+		if not (d.nbs(i).size() in [3, 4]):
+			ok = false
+	_check(ok and d.side_faces().size() == 2, "барабан: 6 граней по кругу, у верхней 2 соседние")
 
 
 func test_finish_early() -> void:
@@ -344,19 +429,39 @@ func test_echo() -> void:
 	var f := _square()
 	run.field = f
 	run.stock = data.zero_res()
+	run.contact_gain = data.zero_res()
+	run._ysnap = []
 	run.plays_left = 4
-	# Без Эхо ничего не срабатывает при постройке: доход только в конце острова
+	# Без Эхо: доход при контакте — постройка и новое соседство платят сразу
 	run.hand = ["mill", "field"]
 	run.place(0, 5)
 	var r: Dictionary = run.place(0, 4)
-	_check(r["echo"].is_empty() and run.stock["food"] == 0, "обычная карта: доход в конце острова, не сразу")
+	_check(r["echo"].is_empty() and run.stock["food"] == run.score()["total"]["food"] and r["contact"].has(5) and r["contact"].has(4), "доход при контакте: Поле и Мельница платят сразу (%d)" % run.stock["food"])
+	var before_echo: int = run.stock["food"]
 	# Эхо I: соседи срабатывают ещё раз сверх обычного
 	run.hand = ["field*1"]
 	r = run.place(0, 6)
 	_check(r["echo"].size() == 1 and r["echo"][0]["cell"] == 5 and int(r["gain"]["food"]) == 1 + 2 + 2, "Эхо I: Мельница рядом срабатывает ещё раз (+5 сразу, %s)" % str(r["gain"]))
-	_check(run.stock["food"] == 5 and run.income()["food"] == run.score()["total"]["food"] + 5, "доход Эхо сразу в казне и идёт в доход острова")
+	_check(run.stock["food"] == run.score()["total"]["food"] + 5 and run.income()["food"] == run.score()["total"]["food"] + 5, "доход Эхо сразу в казне и идёт в доход острова")
 	run.undo()
-	_check(run.stock["food"] == 0 and int(run.echo_gain["food"]) == 0, "отмена возвращает казну")
+	_check(run.stock["food"] == before_echo and int(run.echo_gain["food"]) == 0, "отмена возвращает казну")
+	# Разрыв ничего не отнимает, новое соседство платит снова
+	var g2 := _square()
+	run.field = g2
+	run.stock = data.zero_res()
+	run.contact_gain = data.zero_res()
+	run._ysnap = []
+	run.plays_left = 4
+	run.hand = ["mill", "field"]
+	run.place(0, 5)
+	run.place(0, 6)
+	var paid: int = run.stock["food"]
+	g2.content[6] = ""
+	run._contact()
+	_check(run.stock["food"] == paid, "доход при контакте: снесли Поле — заработанное остаётся")
+	g2.content[4] = "field"
+	run._contact()
+	_check(run.stock["food"] == paid + data.val("field", "base") + data.val("mill", "per_base"), "новое соседство платит снова")
 	# Эхо II: волна на 2 шага по связкам (Поле 2 — Мельница 1? нет; Мельница 5 — Поле 4 — дальше нет связки)
 	var g := _square()
 	g.content[0] = "field"
@@ -430,3 +535,100 @@ func _check(ok: bool, name: String) -> void:
 	else:
 		failures += 1
 		print("FAIL  ", name)
+
+
+func test_menu() -> void:
+	var LandTest = load("res://scripts/land/land_test.gd")
+	var ok := true
+	var bad := ""
+	for e in LandTest.BOSSES + LandTest.ISLANDS + LandTest.LAND + LandTest.PARTS:
+		var run := LandRun.new()
+		LandTest.jump(run, data, e["id"], 0)
+		var want := "market" if e["id"] == "market" else "island"
+		var good: bool = run.phase == want
+		if e["id"] in ["tetra", "cube", "drum"]:
+			good = good and run.is_cube() and run.field.shape == e["id"]
+		elif e["id"] in ["raid", "king"]:
+			good = good and run.is_boss() and not run.is_cube()
+		elif e["id"] == "big":
+			good = good and run.island["big"] and run.turns_here() == int(data.run["big_turns"])
+		elif e["id"] == "forge":
+			good = good and run.island.has("forge")
+		elif e["id"] == "task":
+			good = good and not run.task.is_empty()
+		elif LandTest.PART_TURNS.has(e["id"]):
+			good = good and run.field.has_method("advance") and run.turns_here() == int(LandTest.PART_TURNS[e["id"]])
+		elif e["id"] in data.events:
+			good = good and run.event_type == e["id"]
+		if not good:
+			ok = false
+			bad += e["id"] + " "
+	_check(ok, "тест-меню: каждый босс и остров запускается как надо %s" % bad)
+
+
+func test_parts() -> void:
+	var MF = load("res://scripts/land/multi_field.gd")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	# Парные: общая граница 3 клетки, строить можно только на активном
+	var p = MF.make("pair", rng)
+	var cross := 0
+	for i in p.cells_n():
+		for j in p.nbs(i):
+			if p.part_of[i] == 0 and p.part_of[j] == 1:
+				cross += 1
+	_check(cross == 3, "парные острова: общая граница 3 клетки (%d)" % cross)
+	var free0 := true
+	for i in p.free_cells():
+		if p.part_of[i] != 0:
+			free0 = false
+	p.advance()
+	var free1 := true
+	for i in p.free_cells():
+		if p.part_of[i] != 1:
+			free1 = false
+	_check(free0 and free1 and p.active == 1, "парные: строить можно только на активном острове, после хода — на другом")
+	# Вращающиеся: после поворота меняется, кто смотрит на соседа
+	var s = MF.make("spin", rng)
+	var edge_before := []
+	for i in s.cells_n():
+		for j in s.nbs(i):
+			if s.part_of[i] == 0 and s.part_of[j] == 1:
+				edge_before.append(i)
+	var sh: Dictionary = s.advance()
+	var edge_after := []
+	for i in s.cells_n():
+		for j in s.nbs(i):
+			if s.part_of[i] == 0 and s.part_of[j] == 1:
+				edge_after.append(i)
+	edge_before.sort()
+	edge_after.sort()
+	_check(sh["part"] == 0 and edge_after.size() == 3 and edge_before != edge_after and s.spin_next == 1, "вращающиеся: левый повернулся, к соседу теперь другие клетки, следующим повернётся правый")
+	# Перевёртыш: край связан через ребро, после переворота строим на другой стороне
+	var f = MF.make("flip", rng, "2x3")
+	var four := true
+	for i in f.cells_n():
+		if f.nbs(i).size() < 3:
+			four = false
+	var top0: int = f.active
+	f.advance()
+	var up_ok := true
+	for i in f.cells_n():
+		if (f.part_of[i] == f.active) != (f.up(i).y > 0):
+			up_ok = false
+	_check(four and f.active != top0 and up_ok, "перевёртыш: у каждой клетки сосед через ребро, после переворота сверху другая сторона")
+	# Мельница на краю видит Поле на другой стороне
+	var g = MF.make("flip", rng, "3x3")
+	for i in g.cells_n():
+		g.content[i] = ""
+	var a := -1
+	var b := -1
+	for i in g.cells_n():
+		for j in g.nbs(i):
+			if g.part_of[i] == 0 and g.part_of[j] == 1 and a < 0:
+				a = i
+				b = j
+	g.content[a] = "mill"
+	g.content[b] = "field"
+	var sc: Dictionary = g.score(data)
+	_check(int(sc["cells"][a]["yield"].get("food", 0)) == data.val("mill", "self") + data.val("mill", "per_base"), "перевёртыш: Мельница на ребре получает бонус от Поля снизу")

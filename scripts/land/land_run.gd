@@ -9,6 +9,7 @@ const Deck = preload("res://scripts/core/deck.gd")
 const LandField = preload("res://scripts/land/land_field.gd")
 const LandGen = preload("res://scripts/land/land_gen.gd")
 const LandEvents = preload("res://scripts/land/land_events.gd")
+const ShapeField = preload("res://scripts/land/shape_field.gd")
 
 var data
 var rng := RandomNumberGenerator.new()
@@ -49,10 +50,24 @@ var victory := false
 
 ## Доход острова от Эхо (сверх обычного, уже лежит в казне)
 var echo_gain: Dictionary = {}
+## Доход при контакте: здание платит сразу при постройке и при каждом новом соседстве,
+## разрыв связи ничего не отнимает. contact_gain — заработано так на этом острове (уже в казне).
+var contact_gain: Dictionary = {}
+## Доход каждой клетки на момент последнего начисления
+var _ysnap: Array = []
+## Что принесли стоявшие заранее здания при входе на остров {клетка: {ресурс: n}}
+var start_contact: Dictionary = {}
 ## Сталь с островов-кузниц: босс тратит одну и требует меньше
 var steel := 0
 
 var _history: Array = []
+
+## Босс-куб: нужно выбрать, куда катить (в начале каждого хода)
+var cube_roll := false
+## Эхо, накопленное до начала этого хода (на печать идёт только эхо текущего хода)
+var cube_echo_base: Dictionary = {}
+## Жизни, снятые печатями за бой
+var cube_lost := 0
 
 
 func start(data_, seed: int = -1) -> void:
@@ -159,6 +174,9 @@ func _gen_map() -> void:
 					isl["reward"] = s.get("boss_reward", isl["reward"])
 					isl["big"] = false
 					isl["turns"] = int(data.run["turns_per_field"])
+					if boss.has("cube"):
+						isl["field"] = ShapeField.make(data, rng, boss["cube"])
+						isl["turns"] = int(boss["cube"].get("max_turns", 12))
 				row.append(isl)
 			layers.append(row)
 		# Острова-кузницы: по forges_per_sprint на спринт среди обычных островов
@@ -233,11 +251,21 @@ func choose_island(i: int) -> void:
 	deck._shuffle(deck.draw_pile)
 	hand = deck.draw(int(data.run["hand_size"]))
 	echo_gain = data.zero_res()
+	contact_gain = data.zero_res()
+	_ysnap = []
+	start_contact = _contact()
 	turn = 1
-	plays_left = int(data.run["plays_per_turn"])
+	plays_left = plays_per_turn()
 	_history.clear()
 	intent = LandEvents.plan(event_type, field, data, rng)
 	phase = "island"
+	cube_roll = is_cube() and not field.one_way()
+	cube_lost = 0
+	cube_echo_base = echo_gain.duplicate()
+	if is_cube() and steel > 0 and not island.get("steel_applied", false):
+		field.scale_seals(float(data.run.get("steel_boss_mult", 1.0)))
+		island["steel_applied"] = true
+		steel -= 1
 
 
 ## Ходов на этом острове (большие — больше).
@@ -263,6 +291,59 @@ func is_boss() -> bool:
 	return island.has("boss")
 
 
+## Сколько построек за ход (у куба может быть своё число).
+func plays_per_turn() -> int:
+	if is_cube():
+		return int(cube_cfg().get("plays_per_turn", data.run["plays_per_turn"]))
+	return int(data.run["plays_per_turn"])
+
+
+## Бой с кубом: остров из 6 граней с печатями.
+func is_cube() -> bool:
+	return island.has("boss") and island["boss"].has("cube")
+
+
+func cube_cfg() -> Dictionary:
+	return island.get("boss", {}).get("cube", {})
+
+
+## Куда можно катить куб: на любую соседнюю грань. Грань без печати — передышка
+## (не бьёт, можно готовить рёбра для соседних граней), но ходов в бою ограничено.
+func roll_options() -> Array:
+	if not is_cube() or not cube_roll:
+		return []
+	return field.roll_targets()
+
+
+func roll(face: int) -> bool:
+	if phase != "island" or not (face in roll_options()):
+		return false
+	field.roll_to(face)
+	cube_roll = false
+	cube_echo_base = echo_gain.duplicate()
+	_history.clear()
+	return true
+
+
+## Что верхняя грань даст на печать сейчас: доход грани + Эхо этого хода.
+func cube_have(sc: Dictionary = {}) -> Dictionary:
+	if sc.is_empty():
+		sc = score()
+	var t: Dictionary = sc["total"].duplicate()
+	for r in echo_gain:
+		t[r] = int(t.get(r, 0)) + int(echo_gain[r]) - int(cube_echo_base.get(r, 0))
+	return t
+
+
+func cube_shortfall(face: int = -1, sc: Dictionary = {}) -> int:
+	if face < 0:
+		face = field.top()
+	if sc.is_empty():
+		sc = score()
+	var have: Dictionary = cube_have(sc) if face == field.top() else sc["faces"][face]
+	return ShapeField.shortfall(have, field.seals[face])
+
+
 # ---------------------------------------------------------------- остров
 
 func score() -> Dictionary:
@@ -270,6 +351,8 @@ func score() -> Dictionary:
 
 
 func can_place(hand_idx: int, cell: int) -> bool:
+	if is_cube() and cube_roll:
+		return false
 	return phase == "island" and plays_left > 0 and hand_idx >= 0 and hand_idx < hand.size() and field.is_free(cell)
 
 
@@ -277,7 +360,7 @@ func can_place(hand_idx: int, cell: int) -> bool:
 func place(hand_idx: int, cell: int) -> Dictionary:
 	if not can_place(hand_idx, cell):
 		return {"ok": false, "razed": []}
-	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "echo": echo_gain.duplicate()})
+	_history.append({"field": field.to_dict(), "hand": hand.duplicate(), "plays": plays_left, "stock": stock.duplicate(), "echo": echo_gain.duplicate(), "contact": contact_gain.duplicate(), "snap": _ysnap.duplicate(true)})
 	var id: String = hand[hand_idx]
 	hand.remove_at(hand_idx)
 	var razed: Array = field.place_building(data, cell, id)
@@ -288,7 +371,32 @@ func place(hand_idx: int, cell: int) -> Dictionary:
 	_add_stock(gain)
 	for r in gain:
 		echo_gain[r] = int(echo_gain.get(r, 0)) + int(gain[r])
-	return {"ok": true, "razed": razed, "echo": steps, "gain": gain}
+	var contact := _contact()
+	return {"ok": true, "razed": razed, "echo": steps, "gain": gain, "contact": contact}
+
+
+## Начислить доход новых контактов: прирост дохода каждой клетки с прошлого раза идёт в казну сразу.
+## Падение (связь разорвана, здание выключено) ничего не отнимает. У боссов-фигур — по-старому, в конце.
+func _contact() -> Dictionary:
+	if is_cube():
+		return {}
+	var sc: Dictionary = field.score(data)
+	var cur := []
+	for c in sc["cells"]:
+		cur.append(c["yield"].duplicate())
+	var out := {}
+	for i in cur.size():
+		for r in cur[i]:
+			var was := int(_ysnap[i].get(r, 0)) if i < _ysnap.size() else 0
+			var d := int(cur[i][r]) - was
+			if d > 0:
+				if not out.has(i):
+					out[i] = {}
+				out[i][r] = d
+				contact_gain[r] = int(contact_gain.get(r, 0)) + d
+				stock[r] = int(stock.get(r, 0)) + d
+	_ysnap = cur
+	return out
 
 
 func can_undo() -> bool:
@@ -309,6 +417,8 @@ func undo() -> bool:
 	plays_left = h["plays"]
 	stock = h["stock"]
 	echo_gain = h["echo"]
+	contact_gain = h["contact"]
+	_ysnap = h["snap"]
 	return true
 
 
@@ -327,19 +437,61 @@ static func _diff_card(before: Array, after: Array) -> String:
 func end_turn() -> Dictionary:
 	if phase != "island":
 		return {}
+	if is_cube():
+		return _cube_end_turn()
 	var land: Dictionary = LandEvents.apply(intent, field, data)
 	_history.clear()
 	var out := {"land": land, "field_done": false}
+	# Земля сдвинулась — новые соседства платят сразу
+	out["contact"] = _contact()
 	if turn >= turns_here():
 		out["field_done"] = true
 		out["result"] = _finish_field()
 		return out
+	# Остров из частей: смена острова, поворот или переворот
+	if field.has_method("advance"):
+		out["shift"] = field.advance()
+		var more := _contact()
+		for c in more:
+			out["contact"][c] = more[c]
 	turn += 1
-	plays_left = int(data.run["plays_per_turn"])
+	plays_left = plays_per_turn()
 	var need := int(data.run["hand_size"]) - hand.size()
 	if need > 0:
 		hand.append_array(deck.draw(need))
 	intent = LandEvents.plan(event_type, field, data, rng)
+	return out
+
+
+## Ход с кубом: проверка верхней печати. Хватает — печать снята, нет — минус жизни за нехватку.
+func _cube_end_turn() -> Dictionary:
+	if cube_roll:
+		return {}
+	_history.clear()
+	var f: int = field.top()
+	var sc: Dictionary = score()
+	var judge := {"face": f, "seal": field.seals[f].duplicate(), "have": cube_have(sc), "miss": 0, "broken": false, "was_broken": field.broken[f]}
+	if not field.broken[f]:
+		var miss := cube_shortfall(f, sc)
+		judge["miss"] = miss
+		if miss == 0:
+			field.broken[f] = true
+			judge["broken"] = true
+		else:
+			var lost := miss * int(island["boss"].get("life_per_missing", 1))
+			lives -= lost
+			cube_lost += lost
+	var out := {"land": {}, "field_done": false, "cube": judge}
+	if lives <= 0 or field.sealed_faces().is_empty() or turn >= turns_here():
+		out["field_done"] = true
+		out["result"] = _finish_field()
+		return out
+	turn += 1
+	plays_left = plays_per_turn()
+	var need := int(data.run["hand_size"]) - hand.size()
+	if need > 0:
+		hand.append_array(deck.draw(need))
+	cube_roll = true
 	return out
 
 
@@ -374,7 +526,10 @@ static func sum_res(d: Dictionary) -> int:
 func income(sc: Dictionary = {}) -> Dictionary:
 	if sc.is_empty():
 		sc = score()
-	var t: Dictionary = sc["total"].duplicate()
+	if is_cube():
+		return cube_have(sc)
+	# Всё уже заработанное на острове: контакты + Эхо
+	var t: Dictionary = contact_gain.duplicate()
 	for r in echo_gain:
 		t[r] = int(t.get(r, 0)) + int(echo_gain[r])
 	return t
@@ -393,7 +548,16 @@ func _finish_field() -> Dictionary:
 	var sc: Dictionary = score()
 	var prod: Dictionary = income(sc)
 	var res := {"prod": prod, "lives_before": lives, "island": island, "echo": echo_gain.duplicate()}
-	_add_stock(sc["total"])
+	if is_cube():
+		# В казну — доля дохода всего куба
+		var share := float(cube_cfg().get("treasury_share", 0.5))
+		var gain: Dictionary = data.zero_res()
+		for r in sc["all"]:
+			gain[r] = int(floor(int(sc["all"][r]) * share))
+		prod = gain
+		res["prod"] = gain
+		_add_stock(gain)
+	# обычный остров: доход уже в казне (начислялся при каждом контакте)
 	_add_stock(island.get("reward", {}))
 	res["reward"] = island.get("reward", {})
 	res["task"] = task.duplicate()
@@ -408,7 +572,18 @@ func _finish_field() -> Dictionary:
 		res["steel"] = field.recipe_met(data, island["forge"])
 		if res["steel"]:
 			steel += 1
-	if is_boss():
+	if is_cube():
+		# Оставшиеся печати бьют разом (нехватка по нынешнему доходу грани)
+		var strike := 0
+		for f in field.sealed_faces():
+			strike += ShapeField.shortfall(sc["faces"][f], field.seals[f]) * int(island["boss"].get("life_per_missing", 1))
+		res["boss"] = island["boss"].duplicate()
+		res["cube"] = {"broken": field.face_count() - field.sealed_faces().size(), "faces": field.face_count(), "lost_turns": cube_lost, "strike": strike, "turns": turn}
+		res["boss_missing"] = cube_lost + strike
+		res["boss_total"] = field.face_count() - field.sealed_faces().size()
+		lost += strike
+		res["lives_before"] = lives + cube_lost
+	elif is_boss():
 		var b: Dictionary = island["boss"].duplicate()
 		var total := sum_res(prod)
 		b["need"] = boss_need(b)
@@ -423,7 +598,7 @@ func _finish_field() -> Dictionary:
 	if not contract.is_empty() and int(contract["sprint"]) == sprint:
 		contract["progress"] = int(contract["progress"]) + int(prod.get(contract["res"], 0))
 	lives = mini(lives + int(res["joy"]), int(data.run["lives"])) - lost
-	res["lives_after"] = lives
+	res["lives_after"] = maxi(0, lives)
 	deck.discard(hand)
 	hand = []
 
